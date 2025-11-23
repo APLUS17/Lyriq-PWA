@@ -1,0 +1,7 @@
+{
+  "name": "Lyric Notepad",
+  "description": "A minimalist lyric writing application to jot down song ideas, organize sections, and count syllables in real-time, replicating a modern songwriter's digital notepad.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
