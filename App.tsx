@@ -94,7 +94,7 @@ const App: React.FC = () => {
     const audioChunksRef = useRef<Blob[]>([]);
     const streamRef = useRef<MediaStream | null>(null);
 
-    const isInitialState = beat === null && song.sections.every(s => s.takes.length === 0);
+    const isInitialState = beat === null;
 
     useEffect(() => {
         document.execCommand('defaultParagraphSeparator', false, 'div');
@@ -724,11 +724,11 @@ const App: React.FC = () => {
 
                                                 <div
                                                     style={{ transform: `translateX(${currentTranslateX}px)` }}
-                                                    className={`relative transition-all duration-300 ease-out ${dragState?.sectionId === section.id && dragState?.isDragging ? '!duration-0' : ''} 
+                                                    className={`relative transition-all duration-500 ease-in-out will-change-[padding,background-color,border,box-shadow] ${dragState?.sectionId === section.id && dragState?.isDragging ? '!duration-0' : ''}
                                                     ${isUnstructured
                                                             ? 'bg-transparent border-l-2 border-transparent pl-4 hover:border-white/10 mb-6'
                                                             : 'bg-[#18181b] border border-white/5 rounded-xl p-6 shadow-lg hover:border-white/10 hover:shadow-xl'
-                                                        } 
+                                                        }
                                                     ${isBeingDragged ? 'shadow-2xl scale-[1.02] z-50 bg-zinc-800' : ''}
                                                     ${activeSectionId === section.id && !isUnstructured ? 'ring-1 ring-white/10 bg-[#1c1c1f]' : ''}
                                                     `}
@@ -738,6 +738,8 @@ const App: React.FC = () => {
                                                             <h3
                                                                 contentEditable
                                                                 suppressContentEditableWarning
+                                                                dir="ltr"
+                                                                spellCheck={false}
                                                                 onInput={(e) => updateSectionTitle(section.id, e.currentTarget.innerText)}
                                                                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLHeadingElement).blur(); } }}
                                                                 onPaste={handleTitlePaste}
