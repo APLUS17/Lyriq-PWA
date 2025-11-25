@@ -3,7 +3,7 @@ import { Song, Section, Lyric, AudioTake } from './types';
 import { getSyllableCount, getSyllableCountsForWrappedLines } from './services/syllableService';
 import { UnderlineIcon, SyllableCountIcon, PlusIcon, TrashIcon, GeminiIcon, MicrophoneIcon, MusicNoteIcon, SettingsIcon } from './components/Icons';
 import SectionModal from './components/SectionModal';
-import SettingsModal from './components/SettingsModal';
+import SettingsDropdown from './components/SettingsDropdown';
 import GeminiActionModal from './components/GeminiActionModal';
 import { GoogleGenAI, Type } from "@google/genai";
 import RhymePopup from './components/RhymePopup';
@@ -714,7 +714,7 @@ const App: React.FC = () => {
                             </button>
                         </div>
                         <SectionModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onAddSection={addSection} />
-                        <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} settings={appSettings} />
+                        <SettingsDropdown isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} settings={appSettings} />
                     </div>
 
                     <div className="flex-grow overflow-y-auto custom-scrollbar" onScroll={clearRhymePopupAndTimeout}>
