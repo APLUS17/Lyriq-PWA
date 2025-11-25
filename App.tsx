@@ -11,7 +11,10 @@ import AudioRecorder from './components/AudioRecorder';
 import BottomTakesPlayer from './components/BottomTakesPlayer';
 import InitialControls from './components/InitialControls';
 import MasterPlayer from './components/MasterPlayer';
+import SplashScreen from './components/SplashScreen';
+import OnboardingScreens from './components/OnboardingScreens';
 import { useSettings } from './hooks/useSettings';
+import { useOnboarding } from './hooks/useOnboarding';
 import { preloadAutotuneEngine, isAutotuneEngineReady } from './services/autotuneService';
 
 const initialSectionId = crypto.randomUUID();
@@ -50,6 +53,7 @@ const App: React.FC = () => {
     const [isUnstructured, setIsUnstructured] = useState(true);
     const [showSyllableCount, setShowSyllableCount] = useState(false);
     const appSettings = useSettings();
+    const onboarding = useOnboarding();
     const sectionEditorRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
     const [activeSectionId, setActiveSectionId] = useState<string | null>(initialSectionId);
     const [geminiModalSectionId, setGeminiModalSectionId] = useState<string | null>(null);
@@ -671,7 +675,19 @@ const App: React.FC = () => {
     const activePlayerSection = song.sections.find(s => s.id === activePlayerSectionId);
 
     return (
-        <div className={`h-[100dvh] flex flex-col lyriq-player-view ${isInitialState ? 'empty-state' : ''}`}>
+        <>
+            {/* Splash Screen - Shows first on initial load */}
+            {onboarding.shouldShowSplash && (
+                <SplashScreen onComplete={onboarding.completeSplash} duration={2000} />
+            )}
+
+            {/* Onboarding Screens - Shows after splash */}
+            {!onboarding.shouldShowSplash && onboarding.shouldShowOnboarding && (
+                <OnboardingScreens onComplete={onboarding.completeOnboarding} />
+            )}
+
+            {/* Main App */}
+            <div className={`h-[100dvh] flex flex-col lyriq-player-view ${isInitialState ? 'empty-state' : ''}`}>
             <main className="flex-grow py-8 max-w-screen-xl mx-auto px-4 w-full h-full relative">
                 {/* Glass Container for the Notepad */}
                 <div className="bg-zinc-900/40 backdrop-blur-sm border border-white/5 rounded-2xl h-full flex flex-col overflow-hidden shadow-2xl relative">
@@ -930,7 +946,8 @@ const App: React.FC = () => {
             {beat && (
                 <MasterPlayer beat={beat} onRemoveBeat={handleRemoveBeat} />
             )}
-        </div>
+            </div>
+        </>
     );
 };
 
