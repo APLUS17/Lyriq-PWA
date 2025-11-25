@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Section } from '../types';
+import { Section, AudioTake, AutoTuneMode, AutoTuneSettings } from '../types';
 import { drawStaticWaveform } from '../services/canvasWaveformService';
 import { PlayIcon, PauseIcon, TrashIcon, NextIcon, PreviousIcon } from './Icons';
+import { getAutotuneEngine, isAutotuneEngineReady, preloadAutotuneEngine } from '../services/autotuneService';
 
 interface BottomTakesPlayerProps {
     section: Section;
     onClose: () => void;
     onDeleteTake: (takeId: string, sectionId: string) => void;
+    onUpdateTake?: (sectionId: string, take: AudioTake) => void;
+    autoTuneMode: AutoTuneMode;
+    autoTuneSettings: AutoTuneSettings;
     className?: string;
 }
 
@@ -38,7 +42,15 @@ async function decodeAudioData(base64: string): Promise<AudioBuffer> {
 }
 
 
-const BottomTakesPlayer: React.FC<BottomTakesPlayerProps> = ({ section, onClose, onDeleteTake, className }) => {
+const BottomTakesPlayer: React.FC<BottomTakesPlayerProps> = ({
+    section,
+    onClose,
+    onDeleteTake,
+    onUpdateTake,
+    autoTuneMode,
+    autoTuneSettings,
+    className
+}) => {
     const [playerState, setPlayerState] = useState<'peeking' | 'expanded'>('peeking');
     const [isVisible, setIsVisible] = useState(false);
 
@@ -48,6 +60,11 @@ const BottomTakesPlayer: React.FC<BottomTakesPlayerProps> = ({ section, onClose,
     const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
     const [isLoadingWaveform, setIsLoadingWaveform] = useState(true);
     const [swipeState, setSwipeState] = useState<{ startY: number, currentY: number } | null>(null);
+
+    // Autotune state
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [processingProgress, setProcessingProgress] = useState(0);
+    const [useProcessedVersion, setUseProcessedVersion] = useState(false);
 
     const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
     const waveformContainerRef = useRef<HTMLDivElement | null>(null);
@@ -167,6 +184,56 @@ const BottomTakesPlayer: React.FC<BottomTakesPlayerProps> = ({ section, onClose,
         e.stopPropagation();
         if (currentTake) {
             onDeleteTake(currentTake.id, section.id);
+        }
+    };
+
+    const handleApplyAutotune = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!currentTake || !onUpdateTake) return;
+
+        setIsProcessing(true);
+        setProcessingProgress(0);
+
+        try {
+            // Ensure engine is loaded
+            if (!isAutotuneEngineReady()) {
+                console.log('⏳ Loading autotune engine...');
+                await preloadAutotuneEngine((loaded, total) => {
+                    const percent = Math.round((loaded / total) * 100);
+                    setProcessingProgress(Math.min(percent / 2, 50)); // Use first 50% for loading
+                });
+            }
+
+            const engine = getAutotuneEngine();
+
+            // Process the audio
+            const processed = await engine.processAudio(
+                currentTake.data,
+                autoTuneSettings,
+                (progress) => {
+                    // Use second 50% for processing
+                    setProcessingProgress(50 + progress / 2);
+                }
+            );
+
+            // Update the take with processed audio
+            const updatedTake: AudioTake = {
+                ...currentTake,
+                processedData: processed.data,
+                processedUrl: processed.url,
+                autotuneSettings: autoTuneSettings,
+            };
+
+            onUpdateTake(section.id, updatedTake);
+            setUseProcessedVersion(true);
+
+            console.log('✅ Auto-tune applied successfully!');
+        } catch (error) {
+            console.error('❌ Failed to apply auto-tune:', error);
+            alert('Failed to apply auto-tune. Please try again.');
+        } finally {
+            setIsProcessing(false);
+            setProcessingProgress(0);
         }
     };
 
@@ -329,6 +396,67 @@ const BottomTakesPlayer: React.FC<BottomTakesPlayerProps> = ({ section, onClose,
                     </div>
                     <p className="font-mono text-xs text-gray-500 tabular-nums">{formatDuration(totalDuration)}</p>
                 </div>
+
+                {/* Auto-Tune Controls */}
+                {autoTuneMode !== 'disabled' && (
+                    <div className="mt-6 pt-4 border-t border-white/10">
+                        <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-3">Vocal Effects</p>
+
+                        {isProcessing ? (
+                            <div className="space-y-2">
+                                <div className="flex items-center gap-2 text-yellow-400 text-sm">
+                                    <div className="animate-spin h-4 w-4 border-2 border-yellow-400 border-t-transparent rounded-full"></div>
+                                    <span>Processing audio...</span>
+                                </div>
+                                <div className="w-full bg-zinc-800 rounded-full h-2 overflow-hidden">
+                                    <div
+                                        className="bg-gradient-to-r from-purple-500 to-pink-500 h-full transition-all duration-300"
+                                        style={{ width: `${processingProgress}%` }}
+                                    />
+                                </div>
+                                <p className="text-xs text-gray-500 text-right">{Math.round(processingProgress)}%</p>
+                            </div>
+                        ) : !currentTake?.processedData ? (
+                            <button
+                                type="button"
+                                onClick={handleApplyAutotune}
+                                className="w-full py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-semibold rounded-lg transition-all shadow-lg shadow-purple-500/20 hover:shadow-purple-500/40"
+                            >
+                                ✨ Apply Auto-Tune
+                            </button>
+                        ) : (
+                            <div className="space-y-3">
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setUseProcessedVersion(false)}
+                                        className={`py-2 px-4 rounded-lg font-medium transition-all ${
+                                            !useProcessedVersion
+                                                ? 'bg-white/20 text-white border border-white/30'
+                                                : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+                                        }`}
+                                    >
+                                        🎤 Original
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setUseProcessedVersion(true)}
+                                        className={`py-2 px-4 rounded-lg font-medium transition-all ${
+                                            useProcessedVersion
+                                                ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white border border-purple-400/50'
+                                                : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+                                        }`}
+                                    >
+                                        ✨ Auto-Tuned
+                                    </button>
+                                </div>
+                                <div className="bg-zinc-800/50 rounded-lg px-3 py-2 text-xs text-gray-400">
+                                    <p>Auto-Tune: {currentTake.autotuneSettings?.key} {currentTake.autotuneSettings?.scale}</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
                 </div>
             )}
         </div>

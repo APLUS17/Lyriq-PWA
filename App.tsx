@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import { Song, Section, Lyric, AudioTake } from './types';
 import { getSyllableCount, getSyllableCountsForWrappedLines } from './services/syllableService';
-import { UnderlineIcon, SyllableCountIcon, PlusIcon, TrashIcon, GeminiIcon, MicrophoneIcon, MusicNoteIcon } from './components/Icons';
+import { UnderlineIcon, SyllableCountIcon, PlusIcon, TrashIcon, GeminiIcon, MicrophoneIcon, MusicNoteIcon, SettingsIcon } from './components/Icons';
 import SectionModal from './components/SectionModal';
+import SettingsModal from './components/SettingsModal';
 import GeminiActionModal from './components/GeminiActionModal';
 import { GoogleGenAI, Type } from "@google/genai";
 import RhymePopup from './components/RhymePopup';
@@ -10,6 +11,8 @@ import AudioRecorder from './components/AudioRecorder';
 import BottomTakesPlayer from './components/BottomTakesPlayer';
 import InitialControls from './components/InitialControls';
 import MasterPlayer from './components/MasterPlayer';
+import { useSettings } from './hooks/useSettings';
+import { preloadAutotuneEngine, isAutotuneEngineReady } from './services/autotuneService';
 
 const initialSectionId = crypto.randomUUID();
 const initialSong: Song = {
@@ -43,8 +46,10 @@ const getAudioDuration = (blob: Blob): Promise<number> => {
 const App: React.FC = () => {
     const [song, setSong] = useState<Song>(initialSong);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
     const [isUnstructured, setIsUnstructured] = useState(true);
     const [showSyllableCount, setShowSyllableCount] = useState(false);
+    const appSettings = useSettings();
     const sectionEditorRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
     const [activeSectionId, setActiveSectionId] = useState<string | null>(initialSectionId);
     const [geminiModalSectionId, setGeminiModalSectionId] = useState<string | null>(null);
@@ -619,9 +624,40 @@ const App: React.FC = () => {
         setSong(prevSong => ({ ...prevSong, sections: updatedSections }));
     };
 
-    const handleAddBeat = (file: File) => {
+    const handleUpdateTake = (sectionId: string, updatedTake: AudioTake) => {
+        const updatedSections = song.sections.map(s => {
+            if (s.id === sectionId) {
+                const updatedTakes = s.takes.map(t =>
+                    t.id === updatedTake.id ? updatedTake : t
+                );
+                return { ...s, takes: updatedTakes };
+            }
+            return s;
+        });
+
+        setSong(prevSong => ({ ...prevSong, sections: updatedSections }));
+    };
+
+    const handleAddBeat = async (file: File) => {
         const url = URL.createObjectURL(file);
         setBeat({ url, file });
+
+        // Smart preloading based on user settings
+        if (appSettings.settings.autoTuneMode === 'auto' && !isAutotuneEngineReady()) {
+            console.log('✨ Preparing vocal effects in the background... (~6MB, one-time download)');
+
+            preloadAutotuneEngine((loaded, total) => {
+                const percent = Math.round((loaded / total) * 100);
+                console.log(`⏳ Loading autotune engine: ${percent}%`);
+            })
+            .then(() => {
+                console.log('✅ Auto-tune ready!');
+            })
+            .catch((error) => {
+                console.error('⚠️ Failed to preload autotune engine:', error);
+                console.log('Autotune will load when you click "Apply Auto-Tune"');
+            });
+        }
     };
 
     const handleRemoveBeat = () => {
@@ -668,8 +704,17 @@ const App: React.FC = () => {
                             >
                                 <PlusIcon />
                             </button>
+                            <button
+                                type="button"
+                                onClick={() => setIsSettingsModalOpen(true)}
+                                aria-label="Settings"
+                                className="p-2 rounded-lg hover:bg-white/5 transition-colors text-gray-400 hover:text-white"
+                            >
+                                <SettingsIcon />
+                            </button>
                         </div>
                         <SectionModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onAddSection={addSection} />
+                        <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} settings={appSettings} />
                     </div>
 
                     <div className="flex-grow overflow-y-auto custom-scrollbar" onScroll={clearRhymePopupAndTimeout}>
@@ -872,6 +917,12 @@ const App: React.FC = () => {
                     section={activePlayerSection}
                     onClose={() => setActivePlayerSectionId(null)}
                     onDeleteTake={handleDeleteTake}
+                    onUpdateTake={handleUpdateTake}
+                    autoTuneMode={appSettings.settings.autoTuneMode}
+                    autoTuneSettings={{
+                        key: appSettings.settings.autoTuneKey,
+                        scale: appSettings.settings.autoTuneScale
+                    }}
                 />
             )}
             {isInitialState && recordingState.status !== 'recording' && <InitialControls onAddBeat={handleAddBeat} />}

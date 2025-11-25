@@ -1,3 +1,9 @@
+export type AutoTuneMode = 'auto' | 'manual' | 'disabled';
+
+export interface AutoTuneSettings {
+  key: string;
+  scale: string;
+}
 
 export interface AudioTake {
   id: string;
@@ -6,6 +12,9 @@ export interface AudioTake {
   mimeType: string;
   duration: number; // in seconds
   timestamp: number;
+  processedUrl?: string; // Auto-tuned version URL
+  processedData?: string; // Auto-tuned base64 data
+  autotuneSettings?: AutoTuneSettings; // Settings used for processing
 }
 
 export interface Lyric {
@@ -22,4 +31,10 @@ export interface Section {
 
 export interface Song {
   sections: Section[];
+}
+
+export interface AppSettings {
+  autoTuneMode: AutoTuneMode;
+  autoTuneKey: string;
+  autoTuneScale: string;
 }
