@@ -279,21 +279,24 @@ const BottomTakesPlayer: React.FC<BottomTakesPlayerProps> = ({ section, onClose,
                 <div className="w-12 h-1.5 bg-zinc-700 rounded-full"></div>
             </div>
 
-            <div className="px-6 pb-4 flex items-center justify-between h-[50px]">
-                <div className="flex flex-col justify-center">
-                    <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider">{section.title} <span className="opacity-50 mx-1">|</span> Take {currentTakeIndex + 1}</h2>
-                    <span className="font-mono text-sm text-gray-300 tabular-nums">{formatDuration(currentTime)} / {formatDuration(totalDuration)}</span>
+            {playerState === 'peeking' && (
+                <div className="px-6 pb-4 flex items-center justify-between h-[50px]">
+                    <div className="flex flex-col justify-center">
+                        <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider">{section.title} <span className="opacity-50 mx-1">|</span> Take {currentTakeIndex + 1}</h2>
+                        <span className="font-mono text-sm text-gray-300 tabular-nums">{formatDuration(currentTime)} / {formatDuration(totalDuration)}</span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <button type="button" onClick={handlePrev} disabled={currentTakeIndex === 0} className="disabled:opacity-20 text-gray-400 hover:text-white transition-colors"><PreviousIcon /></button>
+                        <button type="button" onClick={handlePlayPause} className="bg-gray-100 hover:bg-white text-black rounded-full p-2 transition-colors shadow-lg shadow-white/10">
+                            {isPlaying ? <PauseIcon className="h-5 w-5" /> : <PlayIcon className="h-5 w-5" />}
+                        </button>
+                        <button type="button" onClick={handleNext} disabled={currentTakeIndex >= section.takes.length - 1} className="disabled:opacity-20 text-gray-400 hover:text-white transition-colors"><NextIcon /></button>
+                    </div>
                 </div>
-                <div className="flex items-center gap-4">
-                    <button type="button" onClick={handlePrev} disabled={currentTakeIndex === 0} className="disabled:opacity-20 text-gray-400 hover:text-white transition-colors"><PreviousIcon /></button>
-                    <button type="button" onClick={handlePlayPause} className="bg-gray-100 hover:bg-white text-black rounded-full p-2 transition-colors shadow-lg shadow-white/10">
-                        {isPlaying ? <PauseIcon className="h-5 w-5" /> : <PlayIcon className="h-5 w-5" />}
-                    </button>
-                    <button type="button" onClick={handleNext} disabled={currentTakeIndex >= section.takes.length - 1} className="disabled:opacity-20 text-gray-400 hover:text-white transition-colors"><NextIcon /></button>
-                </div>
-            </div>
+            )}
 
-            <div className="px-6 pb-8 pt-2">
+            {playerState === 'expanded' && (
+                <div className="px-6 pb-8 pt-2">
                 <div className="flex justify-between items-end mb-4 px-1">
                     <div className="text-sm">
                         <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Currently Playing</p>
@@ -326,7 +329,8 @@ const BottomTakesPlayer: React.FC<BottomTakesPlayerProps> = ({ section, onClose,
                     </div>
                     <p className="font-mono text-xs text-gray-500 tabular-nums">{formatDuration(totalDuration)}</p>
                 </div>
-            </div>
+                </div>
+            )}
         </div>
     );
 };

@@ -10,6 +10,8 @@ import AudioRecorder from './components/AudioRecorder';
 import BottomTakesPlayer from './components/BottomTakesPlayer';
 import InitialControls from './components/InitialControls';
 import MasterPlayer from './components/MasterPlayer';
+import SplashScreen from './components/SplashScreen';
+
 
 const initialSectionId = crypto.randomUUID();
 const initialSong: Song = {
@@ -94,16 +96,27 @@ const App: React.FC = () => {
     const audioChunksRef = useRef<Blob[]>([]);
     const streamRef = useRef<MediaStream | null>(null);
 
-    const isInitialState = beat === null && song.sections.every(s => s.takes.length === 0);
+    const [showSplash, setShowSplash] = useState(true);
+
+
+    const isInitialState = beat === null;
 
     useEffect(() => {
         document.execCommand('defaultParagraphSeparator', false, 'div');
+
+
 
         const timeouts = deleteTimeouts.current;
         return () => {
             timeouts.forEach(clearTimeout);
         };
     }, []);
+
+    const handleSplashComplete = () => {
+        setShowSplash(false);
+    };
+
+
 
     useLayoutEffect(() => {
         // First, ensure inactive editors are populated correctly before measurement
@@ -636,12 +649,14 @@ const App: React.FC = () => {
 
     return (
         <div className={`h-[100dvh] flex flex-col lyriq-player-view ${isInitialState ? 'empty-state' : ''}`}>
+            {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
+
             <main className="flex-grow py-8 max-w-screen-xl mx-auto px-4 w-full h-full relative">
                 {/* Glass Container for the Notepad */}
-                <div className="bg-zinc-900/40 backdrop-blur-sm border border-white/5 rounded-2xl h-full flex flex-col overflow-hidden shadow-2xl relative">
+                <div className="h-full flex flex-col overflow-hidden relative">
 
                     {/* Header / Toolbar */}
-                    <div className="relative flex items-center justify-between px-6 py-5 flex-shrink-0 border-b border-white/5 bg-zinc-900/50 backdrop-blur-md z-10">
+                    <div className="relative flex items-center justify-between px-6 py-5 flex-shrink-0 z-10">
                         <h2 className="text-3xl font-brand font-bold text-transparent bg-clip-text bg-gradient-to-br from-white via-gray-200 to-gray-400 tracking-tight">Lyriq</h2>
                         <div className="flex items-center space-x-2">
                             <button
@@ -724,11 +739,11 @@ const App: React.FC = () => {
 
                                                 <div
                                                     style={{ transform: `translateX(${currentTranslateX}px)` }}
-                                                    className={`relative transition-all duration-300 ease-out ${dragState?.sectionId === section.id && dragState?.isDragging ? '!duration-0' : ''} 
+                                                    className={`relative transition-all duration-500 ease-in-out will-change-[padding,background-color,border,box-shadow] ${dragState?.sectionId === section.id && dragState?.isDragging ? '!duration-0' : ''}
                                                     ${isUnstructured
                                                             ? 'bg-transparent border-l-2 border-transparent pl-4 hover:border-white/10 mb-6'
                                                             : 'bg-[#18181b] border border-white/5 rounded-xl p-6 shadow-lg hover:border-white/10 hover:shadow-xl'
-                                                        } 
+                                                        }
                                                     ${isBeingDragged ? 'shadow-2xl scale-[1.02] z-50 bg-zinc-800' : ''}
                                                     ${activeSectionId === section.id && !isUnstructured ? 'ring-1 ring-white/10 bg-[#1c1c1f]' : ''}
                                                     `}
@@ -738,6 +753,8 @@ const App: React.FC = () => {
                                                             <h3
                                                                 contentEditable
                                                                 suppressContentEditableWarning
+                                                                dir="ltr"
+                                                                spellCheck={false}
                                                                 onInput={(e) => updateSectionTitle(section.id, e.currentTarget.innerText)}
                                                                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLHeadingElement).blur(); } }}
                                                                 onPaste={handleTitlePaste}

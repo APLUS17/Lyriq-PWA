@@ -170,19 +170,22 @@ const MasterPlayer: React.FC<MasterPlayerProps> = ({ beat, onRemoveBeat }) => {
             <div className="w-full flex justify-center pt-3 pb-1 cursor-pointer" onClick={() => setPlayerState(prev => prev === 'peeking' ? 'expanded' : 'peeking')}>
                 <div className="w-12 h-1.5 bg-zinc-700 rounded-full"></div>
             </div>
-            <div className="px-6 pb-4 flex items-center justify-between h-[50px]">
-                <div className="flex flex-col justify-center">
-                    <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Master Beat</h2>
-                    <span className="font-mono text-sm text-gray-300 tabular-nums">{formatDuration(currentTime)} / {formatDuration(totalDuration)}</span>
+            {playerState === 'peeking' && (
+                <div className="px-6 pb-4 flex items-center justify-between h-[50px]">
+                    <div className="flex flex-col justify-center">
+                        <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Master Beat</h2>
+                        <span className="font-mono text-sm text-gray-300 tabular-nums">{formatDuration(currentTime)} / {formatDuration(totalDuration)}</span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <button type="button" onClick={handlePlayPause} className="bg-gray-100 hover:bg-white text-black rounded-full p-2 transition-colors shadow-lg shadow-white/10">
+                            {isPlaying ? <PauseIcon className="h-5 w-5" /> : <PlayIcon className="h-5 w-5" />}
+                        </button>
+                        <button type="button" onClick={onRemoveBeat} className="text-gray-400 hover:text-white p-2"><TrashIcon /></button>
+                    </div>
                 </div>
-                <div className="flex items-center gap-4">
-                    <button type="button" onClick={handlePlayPause} className="bg-gray-100 hover:bg-white text-black rounded-full p-2 transition-colors shadow-lg shadow-white/10">
-                        {isPlaying ? <PauseIcon className="h-5 w-5" /> : <PlayIcon className="h-5 w-5" />}
-                    </button>
-                    <button type="button" onClick={onRemoveBeat} className="text-gray-400 hover:text-white p-2"><TrashIcon /></button>
-                </div>
-            </div>
-            <div className="px-6 pb-8 pt-2">
+            )}
+            {playerState === 'expanded' && (
+                <div className="px-6 pb-8 pt-2">
                 <div className="flex justify-between items-end mb-4 px-1">
                     <div className="text-sm">
                         <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Instrumental</p>
@@ -204,7 +207,8 @@ const MasterPlayer: React.FC<MasterPlayerProps> = ({ beat, onRemoveBeat }) => {
                     </button>
                     <p className="font-mono text-xs text-gray-500 tabular-nums">{formatDuration(totalDuration)}</p>
                 </div>
-            </div>
+                </div>
+            )}
         </div>
     );
 };
