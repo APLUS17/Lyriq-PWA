@@ -29,17 +29,15 @@ const InitialControls: React.FC<InitialControlsProps> = ({ onAddBeat }) => {
     };
 
     return (
-        <div className="fixed bottom-8 right-6 z-40">
+        <>
             <button
                 type="button"
                 onClick={handleAddBeatClick}
-                className="flex items-center gap-2 px-4 py-3 bg-zinc-900/80 backdrop-blur-md border border-white/10 rounded-full text-gray-300 hover:text-white hover:bg-zinc-800 transition-all shadow-lg hover:shadow-xl hover:border-white/20 group"
+                className="fixed bottom-8 right-6 z-40 flex items-center gap-2 rounded-full bg-zinc-900/80 px-5 py-3 text-sm font-medium text-white shadow-lg backdrop-blur-md border border-white/10 hover:bg-zinc-800 transition-all active:scale-95"
                 aria-label="Add beat from file"
             >
-                <div className="text-yellow-500 group-hover:text-yellow-400 transition-colors">
-                    <AddBeatIcon />
-                </div>
-                <span className="font-medium text-sm">Add Beat</span>
+                <MusicNoteIcon />
+                <span>Add Beat</span>
             </button>
             <input
                 type="file"
@@ -49,8 +47,9 @@ const InitialControls: React.FC<InitialControlsProps> = ({ onAddBeat }) => {
                 className="hidden"
                 aria-hidden="true"
             />
-        </div>
+        </>
     );
+
 };
 
 export default InitialControls;

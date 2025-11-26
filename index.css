@@ -85,3 +85,21 @@ html {
 .animate-pulse-ring {
   animation: pulseRing 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+@keyframes pulseSlow {
+
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.8;
+    transform: scale(0.95);
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulseSlow 3s ease-in-out infinite;
+}

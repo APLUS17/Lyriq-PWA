@@ -38,7 +38,7 @@ export const UnderlineIcon: React.FC<{ active: boolean }> = ({ active }) => (
 );
 
 export const SyllableCountIcon: React.FC<{ active: boolean }> = ({ active }) => (
-     <span className={`font-sans text-xl font-bold tracking-tighter cursor-pointer ${active ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>S</span>
+    <span className={`font-sans text-xl font-bold tracking-tighter cursor-pointer ${active ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>S</span>
 );
 
 export const PlusIcon: React.FC = () => (
@@ -72,18 +72,20 @@ export const MicrophoneIcon: React.FC = () => (
 );
 
 export const MusicNoteIcon: React.FC = () => (
-    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V7.5A2.25 2.25 0 0019.5 5.25v1.838m-9 0a2.25 2.25 0 00-2.25 2.25v3.75a2.25 2.25 0 002.25 2.25h.75A2.25 2.25 0 0012 15.75v-3.75a2.25 2.25 0 00-2.25-2.25H9z" />
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 18V5l12-2v13" />
+        <circle cx="6" cy="18" r="3" />
+        <circle cx="18" cy="16" r="3" />
     </svg>
 );
 
-export const PlayIcon: React.FC<{className?: string}> = ({ className = "h-6 w-6" }) => (
+export const PlayIcon: React.FC<{ className?: string }> = ({ className = "h-6 w-6" }) => (
     <svg className={className} fill="currentColor" viewBox="0 0 24 24">
         <path d="M8 5v14l11-7z" />
     </svg>
 );
 
-export const PauseIcon: React.FC<{className?: string}> = ({ className = "h-6 w-6" }) => (
+export const PauseIcon: React.FC<{ className?: string }> = ({ className = "h-6 w-6" }) => (
     <svg className={className} fill="currentColor" viewBox="0 0 24 24">
         <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
     </svg>
