@@ -145,15 +145,23 @@ const App: React.FC = () => {
 
                 const sectionCounts: (number[] | null)[] = [];
 
-                if (section.id === activeSectionId) {
-                    const lineDivs = editorDiv.children;
-                    for (let i = 0; i < lineDivs.length; i++) {
-                        sectionCounts.push(getSyllableCountsForWrappedLines(lineDivs[i] as HTMLDivElement));
-                    }
-                } else {
-                    for (const lyric of section.lyrics) {
-                        const lyricDiv = editorDiv.querySelector(`[data-lyric-id="${lyric.id}"]`) as HTMLDivElement;
-                        sectionCounts.push(lyricDiv ? getSyllableCountsForWrappedLines(lyricDiv) : null);
+                // Use consistent ID-based matching for both active and inactive sections
+                for (const lyric of section.lyrics) {
+                    const lyricDiv = editorDiv.querySelector(`[data-lyric-id="${lyric.id}"]`) as HTMLDivElement;
+                    if (lyricDiv) {
+                        sectionCounts.push(getSyllableCountsForWrappedLines(lyricDiv));
+                    } else {
+                        // Fallback: if we can't find the div by ID (might happen during active editing),
+                        // try to match by position or use fallback counting
+                        const allDivs = Array.from(editorDiv.children);
+                        const lyricIndex = section.lyrics.indexOf(lyric);
+                        if (lyricIndex >= 0 && lyricIndex < allDivs.length) {
+                            sectionCounts.push(getSyllableCountsForWrappedLines(allDivs[lyricIndex] as HTMLDivElement));
+                        } else {
+                            // Ultimate fallback: count from the HTML string
+                            const counts = getSyllableCount(lyric.html);
+                            sectionCounts.push(counts !== null ? [counts] : null);
+                        }
                     }
                 }
                 newCountsBySection[section.id] = sectionCounts;
@@ -368,12 +376,15 @@ const App: React.FC = () => {
             return [];
         }
 
-        const processHtmlContent = (html: string) => {
+        const processHtmlContent = (html: string, existingId?: string) => {
             if (html.toLowerCase().trim() === '<br>') {
-                lyrics.push({ id: crypto.randomUUID(), html: '' });
+                lyrics.push({ id: existingId || crypto.randomUUID(), html: '' });
             } else {
-                html.split(/<br\s*\/?>/i).forEach(lineHtml => {
-                    lyrics.push({ id: crypto.randomUUID(), html: lineHtml });
+                const splitLines = html.split(/<br\s*\/?>/i);
+                splitLines.forEach((lineHtml, index) => {
+                    // Only preserve ID for the first split line from a block
+                    const id = (index === 0 && existingId) ? existingId : crypto.randomUUID();
+                    lyrics.push({ id, html: lineHtml });
                 });
             }
         };
@@ -382,7 +393,8 @@ const App: React.FC = () => {
 
         if (blocks.length > 0) {
             blocks.forEach(block => {
-                processHtmlContent((block as HTMLElement).innerHTML);
+                const existingId = (block as HTMLElement).getAttribute('data-lyric-id') || undefined;
+                processHtmlContent((block as HTMLElement).innerHTML, existingId);
             });
         } else {
             processHtmlContent(node.innerHTML);
