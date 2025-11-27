@@ -55,6 +55,9 @@ const App: React.FC = () => {
     // Syllable count state for wrapped lines
     const [lineCountsBySection, setLineCountsBySection] = useState<Record<string, (number[] | null)[]>>({});
 
+    // Mobile composition tracking (for mobile keyboards)
+    const isComposingRef = useRef(false);
+
     // Master beat state
     const [beat, setBeat] = useState<{ url: string; file: File } | null>(null);
 
@@ -173,14 +176,25 @@ const App: React.FC = () => {
             });
         };
 
-        // Use double requestAnimationFrame + small delay for mobile browsers
+        // Enhanced mobile measurement timing
+        // Wait for fonts to load, then measure after layout stabilizes
         let rafId1: number, rafId2: number, timeoutId: number;
-        rafId1 = requestAnimationFrame(() => {
-            rafId2 = requestAnimationFrame(() => {
-                // Additional 10ms delay ensures mobile layout is complete
-                timeoutId = setTimeout(calculateVisualLineCounts, 10) as any;
+
+        const performMeasurement = () => {
+            rafId1 = requestAnimationFrame(() => {
+                rafId2 = requestAnimationFrame(() => {
+                    // Longer delay for mobile: 50ms to ensure virtual keyboard, fonts, and layout are stable
+                    timeoutId = setTimeout(calculateVisualLineCounts, 50) as any;
+                });
             });
-        });
+        };
+
+        // Wait for fonts if document.fonts API is available
+        if (document.fonts && document.fonts.ready) {
+            document.fonts.ready.then(performMeasurement);
+        } else {
+            performMeasurement();
+        }
 
         const debounce = (fn: Function, ms = 150) => {
             let timeoutId: ReturnType<typeof setTimeout>;
@@ -190,8 +204,9 @@ const App: React.FC = () => {
             };
         };
 
-        const debouncedResizeHandler = debounce(calculateVisualLineCounts);
+        const debouncedResizeHandler = debounce(calculateVisualLineCounts, 200);
         window.addEventListener('resize', debouncedResizeHandler);
+        window.addEventListener('orientationchange', debouncedResizeHandler);
 
         if (window.visualViewport) {
             window.visualViewport.addEventListener('resize', debouncedResizeHandler);
@@ -202,6 +217,7 @@ const App: React.FC = () => {
             cancelAnimationFrame(rafId2);
             clearTimeout(timeoutId);
             window.removeEventListener('resize', debouncedResizeHandler);
+            window.removeEventListener('orientationchange', debouncedResizeHandler);
             if (window.visualViewport) {
                 window.visualViewport.removeEventListener('resize', debouncedResizeHandler);
             }
@@ -405,6 +421,11 @@ const App: React.FC = () => {
 
 
     const handleLyricsInput = (sectionId: string, editorNode: HTMLDivElement) => {
+        // Skip processing during composition (mobile keyboard is still composing)
+        if (isComposingRef.current) {
+            return;
+        }
+
         clearRhymePopupAndTimeout();
         const newLyrics = parseLyricsFromDom(editorNode);
         setSong(prevSong => ({
@@ -413,6 +434,30 @@ const App: React.FC = () => {
                 s.id === sectionId ? { ...s, lyrics: newLyrics } : s
             )
         }));
+
+        // Immediately sync the active editor's DOM with data-lyric-id attributes
+        // This ensures the DOM has stable IDs for syllable counting
+        requestAnimationFrame(() => {
+            const childDivs = Array.from(editorNode.children);
+            newLyrics.forEach((lyric, index) => {
+                if (index < childDivs.length) {
+                    const childDiv = childDivs[index] as HTMLElement;
+                    if (childDiv.getAttribute('data-lyric-id') !== lyric.id) {
+                        childDiv.setAttribute('data-lyric-id', lyric.id);
+                    }
+                }
+            });
+        });
+    };
+
+    const handleCompositionStart = () => {
+        isComposingRef.current = true;
+    };
+
+    const handleCompositionEnd = (sectionId: string, editorNode: HTMLDivElement) => {
+        isComposingRef.current = false;
+        // Process input after composition ends
+        handleLyricsInput(sectionId, editorNode);
     };
 
     const updateSectionTitle = (sectionId: string, newTitle: string) => {
@@ -822,6 +867,8 @@ const App: React.FC = () => {
                                                             onMouseUp={handleSelection}
                                                             onTouchEnd={handleSelection}
                                                             onInput={e => handleLyricsInput(section.id, e.currentTarget as HTMLDivElement)}
+                                                            onCompositionStart={handleCompositionStart}
+                                                            onCompositionEnd={e => handleCompositionEnd(section.id, e.currentTarget as HTMLDivElement)}
                                                             onPaste={handlePaste}
                                                             className="lyric-editor flex-grow outline-none text-gray-200 text-lg leading-relaxed tracking-normal"
                                                         />
