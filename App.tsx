@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import { Song, Section, Lyric, AudioTake } from './types';
 import { getSyllableCount, getSyllableCountsForWrappedLines } from './services/syllableService';
-import { UnderlineIcon, SyllableCountIcon, PlusIcon, TrashIcon, GeminiIcon, MicrophoneIcon, MusicNoteIcon } from './components/Icons';
+import { TrashIcon, GeminiIcon, MicrophoneIcon, MusicNoteIcon } from './components/Icons';
 import SectionModal from './components/SectionModal';
 import GeminiActionModal from './components/GeminiActionModal';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -10,10 +10,37 @@ import AudioRecorder from './components/AudioRecorder';
 import BottomTakesPlayer from './components/BottomTakesPlayer';
 import InitialControls from './components/InitialControls';
 import MasterPlayer from './components/MasterPlayer';
-import SplashScreen from './components/SplashScreen';
 import HomeScreen from './components/HomeScreen';
-import { AnimatePresence } from 'framer-motion';
+import EditorControlPill from './components/EditorControlPill';
+import { AnimatePresence, motion } from 'framer-motion';
+import { ChevronLeft } from 'lucide-react';
 
+
+// Page animation variants
+const pageVariants = {
+  initial: (direction: number) => ({
+    x: direction > 0 ? 100 : -100,
+    opacity: 0,
+    scale: 0.95,
+    filter: "blur(10px)"
+  }),
+  animate: {
+    x: 0,
+    opacity: 1,
+    scale: 1,
+    filter: "blur(0px)",
+    transition: {
+      x: { type: "spring", stiffness: 300, damping: 30 },
+      opacity: { duration: 0.2 }
+    }
+  },
+  exit: (direction: number) => ({
+    x: direction < 0 ? 100 : -100,
+    opacity: 0,
+    scale: 0.95,
+    filter: "blur(10px)"
+  }),
+};
 
 const initialSectionId = crypto.randomUUID();
 const initialSong: Song = {
@@ -48,6 +75,7 @@ const App: React.FC = () => {
     // Navigation state
     const [currentScreen, setCurrentScreen] = useState<'home' | 'editor'>('home');
     const [activeProjectTitle, setActiveProjectTitle] = useState('Untitled Song');
+    const [direction, setDirection] = useState(0); // 1 = forward, -1 = back
     const [projects, setProjects] = useState([
         { id: 1, title: 'Lyric Notes App', time: '2 days', gradient: 'bg-gradient-to-tr from-rose-400 to-pink-500' },
         { id: 2, title: 'Whoa', time: '3 months', gradient: 'bg-gradient-to-tr from-indigo-400 to-purple-500' },
@@ -661,9 +689,11 @@ const App: React.FC = () => {
     // Navigation handler
     const handleNavigate = (screen: string, title?: string) => {
         if (screen === 'editor') {
+            setDirection(1); // Forward
             if (title) setActiveProjectTitle(title);
             setCurrentScreen('editor');
         } else if (screen === 'home') {
+            setDirection(-1); // Back
             setCurrentScreen('home');
         }
     };
@@ -676,43 +706,46 @@ const App: React.FC = () => {
         <div className="bg-black w-full min-h-screen overflow-hidden">
             <AnimatePresence mode="wait">
                 {currentScreen === 'home' ? (
-                    <HomeScreen key="home" onNavigate={handleNavigate} projects={projects} />
+                    <motion.div
+                        key="home"
+                        custom={direction}
+                        variants={pageVariants}
+                        initial="initial"
+                        animate="animate"
+                        exit="exit"
+                    >
+                        <HomeScreen onNavigate={handleNavigate} projects={projects} />
+                    </motion.div>
                 ) : (
-                    <div key="editor" className={`h-[100dvh] flex flex-col lyriq-player-view ${isInitialState ? 'empty-state' : ''}`}>
-                        {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
-
+                    <motion.div
+                        key="editor"
+                        custom={direction}
+                        variants={pageVariants}
+                        initial="initial"
+                        animate="animate"
+                        exit="exit"
+                        className={`h-[100dvh] flex flex-col lyriq-player-view ${isInitialState ? 'empty-state' : ''}`}
+                    >
                         <main className="flex-grow py-8 max-w-screen-xl mx-auto px-4 w-full h-full relative">
                             {/* Glass Container for the Notepad */}
                             <div className="h-full flex flex-col overflow-hidden relative">
 
                                 {/* Header / Toolbar */}
-                                <div className="relative flex items-center justify-between px-6 py-5 flex-shrink-0 z-10">
-                                    <h2 className="text-3xl font-brand font-bold text-transparent bg-clip-text bg-gradient-to-br from-white via-gray-200 to-gray-400 tracking-tight">Lyriq</h2>
-                                    <div className="flex items-center space-x-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => setIsUnstructured(prev => !prev)}
-                                            aria-label="Toggle unstructured view"
-                                            className="p-2 rounded-lg hover:bg-white/5 transition-colors"
-                                        >
-                                            <UnderlineIcon active={isUnstructured} />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowSyllableCount(prev => !prev)}
-                                            aria-label="Toggle syllable count"
-                                            className="p-2 rounded-lg hover:bg-white/5 transition-colors"
-                                        >
-                                            <SyllableCountIcon active={showSyllableCount} />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setIsModalOpen(true)}
-                                            aria-label="Add section"
-                                            className="p-2 rounded-lg hover:bg-white/5 transition-colors text-gray-400 hover:text-white"
-                                        >
-                                            <PlusIcon />
-                                        </button>
+                                <div className="relative flex items-center gap-4 px-6 py-5 flex-shrink-0 z-10">
+                                    <button
+                                        onClick={() => handleNavigate('home')}
+                                        className="text-gray-400 hover:text-white transition-colors p-2 -ml-2 rounded-full hover:bg-white/5"
+                                        aria-label="Go back to projects"
+                                    >
+                                        <ChevronLeft size={24} />
+                                    </button>
+                                    <div className="flex-grow">
+                                        <input
+                                            value={activeProjectTitle}
+                                            onChange={(e) => setActiveProjectTitle(e.target.value)}
+                                            className="bg-transparent text-3xl font-extrabold w-full outline-none placeholder-gray-700 tracking-tight text-white"
+                                            placeholder="Untitled Song"
+                                        />
                                     </div>
                                     <SectionModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onAddSection={addSection} />
                                 </div>
@@ -895,6 +928,15 @@ const App: React.FC = () => {
                             </div>
                         </main>
 
+                        {/* Control Pill */}
+                        <EditorControlPill
+                            isUnstructured={isUnstructured}
+                            showSyllableCount={showSyllableCount}
+                            onToggleUnstructured={() => setIsUnstructured(prev => !prev)}
+                            onToggleSyllableCount={() => setShowSyllableCount(prev => !prev)}
+                            onAddSection={() => setIsModalOpen(true)}
+                        />
+
                         {/* Modals and Overlays */}
                         {geminiModalSectionId && anchorEl && (
                             <GeminiActionModal
@@ -924,7 +966,7 @@ const App: React.FC = () => {
                         {beat && (
                             <MasterPlayer beat={beat} onRemoveBeat={handleRemoveBeat} />
                         )}
-                    </div>
+                    </motion.div>
                 )}
             </AnimatePresence>
         </div>
