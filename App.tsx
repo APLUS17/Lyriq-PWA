@@ -11,6 +11,8 @@ import BottomTakesPlayer from './components/BottomTakesPlayer';
 import InitialControls from './components/InitialControls';
 import MasterPlayer from './components/MasterPlayer';
 import SplashScreen from './components/SplashScreen';
+import HomeScreen from './components/HomeScreen';
+import { AnimatePresence } from 'framer-motion';
 
 
 const initialSectionId = crypto.randomUUID();
@@ -43,6 +45,15 @@ const getAudioDuration = (blob: Blob): Promise<number> => {
 };
 
 const App: React.FC = () => {
+    // Navigation state
+    const [currentScreen, setCurrentScreen] = useState<'home' | 'editor'>('home');
+    const [activeProjectTitle, setActiveProjectTitle] = useState('Untitled Song');
+    const [projects, setProjects] = useState([
+        { id: 1, title: 'Lyric Notes App', time: '2 days', gradient: 'bg-gradient-to-tr from-rose-400 to-pink-500' },
+        { id: 2, title: 'Whoa', time: '3 months', gradient: 'bg-gradient-to-tr from-indigo-400 to-purple-500' },
+        { id: 3, title: 'New Project', time: '4 months', gradient: 'bg-gradient-to-tr from-yellow-300 to-pink-300' },
+    ]);
+
     const [song, setSong] = useState<Song>(initialSong);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isUnstructured, setIsUnstructured] = useState(true);
@@ -647,253 +658,275 @@ const App: React.FC = () => {
     const anchorEl = geminiModalSectionId ? geminiIconRefs.current[geminiModalSectionId] : null;
     const activePlayerSection = song.sections.find(s => s.id === activePlayerSectionId);
 
+    // Navigation handler
+    const handleNavigate = (screen: string, title?: string) => {
+        if (screen === 'editor') {
+            if (title) setActiveProjectTitle(title);
+            setCurrentScreen('editor');
+        } else if (screen === 'home') {
+            setCurrentScreen('home');
+        }
+    };
+
+    const handleSaveProject = () => {
+        handleNavigate('home');
+    };
+
     return (
-        <div className={`h-[100dvh] flex flex-col lyriq-player-view ${isInitialState ? 'empty-state' : ''}`}>
-            {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
+        <div className="bg-black w-full min-h-screen overflow-hidden">
+            <AnimatePresence mode="wait">
+                {currentScreen === 'home' ? (
+                    <HomeScreen key="home" onNavigate={handleNavigate} projects={projects} />
+                ) : (
+                    <div key="editor" className={`h-[100dvh] flex flex-col lyriq-player-view ${isInitialState ? 'empty-state' : ''}`}>
+                        {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
 
-            <main className="flex-grow py-8 max-w-screen-xl mx-auto px-4 w-full h-full relative">
-                {/* Glass Container for the Notepad */}
-                <div className="h-full flex flex-col overflow-hidden relative">
+                        <main className="flex-grow py-8 max-w-screen-xl mx-auto px-4 w-full h-full relative">
+                            {/* Glass Container for the Notepad */}
+                            <div className="h-full flex flex-col overflow-hidden relative">
 
-                    {/* Header / Toolbar */}
-                    <div className="relative flex items-center justify-between px-6 py-5 flex-shrink-0 z-10">
-                        <h2 className="text-3xl font-brand font-bold text-transparent bg-clip-text bg-gradient-to-br from-white via-gray-200 to-gray-400 tracking-tight">Lyriq</h2>
-                        <div className="flex items-center space-x-2">
-                            <button
-                                type="button"
-                                onClick={() => setIsUnstructured(prev => !prev)}
-                                aria-label="Toggle unstructured view"
-                                className="p-2 rounded-lg hover:bg-white/5 transition-colors"
-                            >
-                                <UnderlineIcon active={isUnstructured} />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setShowSyllableCount(prev => !prev)}
-                                aria-label="Toggle syllable count"
-                                className="p-2 rounded-lg hover:bg-white/5 transition-colors"
-                            >
-                                <SyllableCountIcon active={showSyllableCount} />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setIsModalOpen(true)}
-                                aria-label="Add section"
-                                className="p-2 rounded-lg hover:bg-white/5 transition-colors text-gray-400 hover:text-white"
-                            >
-                                <PlusIcon />
-                            </button>
-                        </div>
-                        <SectionModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onAddSection={addSection} />
-                    </div>
-
-                    <div className="flex-grow overflow-y-auto custom-scrollbar" onScroll={clearRhymePopupAndTimeout}>
-                        <div className="pt-6 px-4 md:px-8 pb-32">
-                            {song.sections.map((section, index) => {
-                                const isDeleting = deletingSections.has(section.id);
-                                const currentTranslateX = (dragState?.sectionId === section.id) ? dragState.translateX : 0;
-
-                                const isBeingDragged = reorderState?.sectionId === section.id;
-                                let containerStyle = {};
-                                let containerClasses = `transition-transform duration-300 ease-in-out`;
-
-                                if (reorderState) {
-                                    const { startIndex, currentY, initialY, draggedElHeight } = reorderState;
-                                    const finalDropIndex = dropIndex ?? startIndex;
-
-                                    if (isBeingDragged) {
-                                        containerStyle = {
-                                            transform: `translateY(${currentY - initialY}px)`,
-                                            zIndex: 50,
-                                            cursor: 'grabbing',
-                                        };
-                                        containerClasses = '';
-                                    } else {
-                                        let shiftAmount = 0;
-                                        if (startIndex < finalDropIndex && index > startIndex && index <= finalDropIndex) {
-                                            shiftAmount = -draggedElHeight - (isUnstructured ? 24 : 32);
-                                        } else if (startIndex > finalDropIndex && index < startIndex && index >= finalDropIndex) {
-                                            shiftAmount = draggedElHeight + (isUnstructured ? 24 : 32);
-                                        }
-                                        if (shiftAmount !== 0) {
-                                            containerStyle = { transform: `translateY(${shiftAmount}px)` };
-                                        }
-                                    }
-                                }
-
-                                return (
-                                    <div key={section.id}>
-                                        <div
-                                            className={`transition-all duration-500 ease-in-out ${isUnstructured ? 'mb-0' : 'mb-8'} ${isDeleting ? 'max-h-0 opacity-0 !mb-0' : 'max-h-[600px]'}`}
+                                {/* Header / Toolbar */}
+                                <div className="relative flex items-center justify-between px-6 py-5 flex-shrink-0 z-10">
+                                    <h2 className="text-3xl font-brand font-bold text-transparent bg-clip-text bg-gradient-to-br from-white via-gray-200 to-gray-400 tracking-tight">Lyriq</h2>
+                                    <div className="flex items-center space-x-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsUnstructured(prev => !prev)}
+                                            aria-label="Toggle unstructured view"
+                                            className="p-2 rounded-lg hover:bg-white/5 transition-colors"
                                         >
-                                            <div
-                                                ref={el => { sectionContainerRefs.current[section.id] = el; }}
-                                                className={`relative ${containerClasses}`}
-                                                style={containerStyle}
-                                                onMouseDown={(e) => handleGestureStart(e, section.id)}
-                                                onTouchStart={(e) => handleGestureStart(e, section.id)}
-                                            >
-                                                <div className={`absolute inset-0 rounded-xl flex justify-end items-center pr-8 pointer-events-none ${!isUnstructured ? 'bg-red-900/50' : ''}`}>
-                                                    {!isUnstructured && <TrashIcon />}
-                                                </div>
-
-                                                <div
-                                                    style={{ transform: `translateX(${currentTranslateX}px)` }}
-                                                    className={`relative transition-all duration-500 ease-in-out will-change-[padding,background-color,border,box-shadow] ${dragState?.sectionId === section.id && dragState?.isDragging ? '!duration-0' : ''}
-                                                    ${isUnstructured
-                                                            ? 'bg-transparent border-l-2 border-transparent pl-4 hover:border-white/10 mb-6'
-                                                            : 'bg-[#18181b] border border-white/5 rounded-xl p-6 shadow-lg hover:border-white/10 hover:shadow-xl'
-                                                        }
-                                                    ${isBeingDragged ? 'shadow-2xl scale-[1.02] z-50 bg-zinc-800' : ''}
-                                                    ${activeSectionId === section.id && !isUnstructured ? 'ring-1 ring-white/10 bg-[#1c1c1f]' : ''}
-                                                    `}
-                                                >
-                                                    <div className="flex items-center justify-between mb-4">
-                                                        <div className="flex items-center gap-3 group">
-                                                            <h3
-                                                                contentEditable
-                                                                suppressContentEditableWarning
-                                                                dir="ltr"
-                                                                spellCheck={false}
-                                                                onInput={(e) => updateSectionTitle(section.id, e.currentTarget.innerText)}
-                                                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLHeadingElement).blur(); } }}
-                                                                onPaste={handleTitlePaste}
-                                                                className={`w-fit font-bold tracking-wide text-xs uppercase outline-none rounded-sm px-1 -ml-1 transition-colors
-                                                                    ${isUnstructured ? 'text-gray-500 focus:text-gray-300' : 'text-gray-400 bg-white/5 py-0.5 px-2'}`}
-                                                            >{section.title}</h3>
-                                                            <button
-                                                                ref={el => { geminiIconRefs.current[section.id] = el; }}
-                                                                type="button"
-                                                                aria-label="Gemini Actions"
-                                                                onClick={(e) => handleGeminiIconClick(e, section.id)}
-                                                                className={`transition-all duration-300 ease-in-out text-blue-400 hover:text-blue-300 ${activeSectionId === section.id ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}
-                                                                tabIndex={activeSectionId === section.id ? 0 : -1}
-                                                            >
-                                                                <GeminiIcon className="h-4 w-4" />
-                                                            </button>
-                                                        </div>
-                                                        {!isUnstructured && (
-                                                            <div className="flex items-center space-x-1">
-                                                                {section.takes.length > 0 && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => setActivePlayerSectionId(section.id)}
-                                                                        className="bg-zinc-800/80 border border-white/5 rounded-full flex items-center space-x-1.5 px-3 py-1 text-xs font-medium text-gray-300 hover:bg-zinc-700 hover:text-white transition-all"
-                                                                        aria-label={`Show ${section.takes.length} audio takes`}
-                                                                    >
-                                                                        <MusicNoteIcon />
-                                                                        <span>{section.takes.length}</span>
-                                                                    </button>
-                                                                )}
-                                                                <button
-                                                                    type="button"
-                                                                    aria-label="Record audio"
-                                                                    onClick={() => handleRecordClick(section.id)}
-                                                                    className="p-2 text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded-full transition-all"
-                                                                >
-                                                                    <MicrophoneIcon />
-                                                                </button>
-                                                            </div>
-                                                        )}
-                                                    </div>
-
-                                                    <div className="flex items-start">
-                                                        <div
-                                                            ref={el => { sectionEditorRefs.current[section.id] = el; }}
-                                                            contentEditable
-                                                            data-placeholder="Start writing..."
-                                                            data-section-id={section.id}
-                                                            onFocus={() => { clearRhymePopupAndTimeout(); setActiveSectionId(section.id); }}
-                                                            onBlur={clearRhymePopupAndTimeout}
-                                                            onMouseDown={clearRhymePopupAndTimeout}
-                                                            onTouchStart={clearRhymePopupAndTimeout}
-                                                            onMouseUp={handleSelection}
-                                                            onTouchEnd={handleSelection}
-                                                            onInput={e => handleLyricsInput(section.id, e.currentTarget as HTMLDivElement)}
-                                                            onPaste={handlePaste}
-                                                            className="lyric-editor flex-grow outline-none text-gray-200 text-lg leading-relaxed tracking-normal"
-                                                        />
-                                                        {/* Syllable Count Column */}
-                                                        <div className={`pl-4 w-14 text-right transition-opacity duration-300 flex flex-col items-end gap-[0px] ${showSyllableCount ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                                                            {section.lyrics.map((lyric, lineIndex) => {
-                                                                const counts = (lineCountsBySection[section.id] || [])[lineIndex];
-
-                                                                const renderPill = (val: number | null) => (
-                                                                    <div className="text-lg leading-relaxed flex items-center justify-end h-[1.75em]">
-                                                                        {val !== null && val > 0 && (
-                                                                            <span className="inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5 text-[10px] font-mono font-medium text-gray-400 bg-white/5 border border-white/5 rounded-full tabular-nums">
-                                                                                {val}
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                );
-
-                                                                if (!lyric.html.trim()) {
-                                                                    return <div key={lyric.id} className="text-lg leading-relaxed">{'\u00A0'}</div>;
-                                                                }
-
-                                                                if (counts && counts.length > 1) {
-                                                                    return (
-                                                                        <div key={lyric.id}>
-                                                                            {counts.map((count, wrapIndex) => (
-                                                                                <React.Fragment key={wrapIndex}>
-                                                                                    {renderPill(count)}
-                                                                                </React.Fragment>
-                                                                            ))}
-                                                                        </div>
-                                                                    );
-                                                                }
-
-                                                                const fallbackCount = getSyllableCount(lyric.html);
-                                                                const singleCount = (counts && counts.length === 1) ? counts[0] : fallbackCount;
-                                                                return (
-                                                                    <React.Fragment key={lyric.id}>
-                                                                        {renderPill(singleCount)}
-                                                                    </React.Fragment>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
+                                            <UnderlineIcon active={isUnstructured} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowSyllableCount(prev => !prev)}
+                                            aria-label="Toggle syllable count"
+                                            className="p-2 rounded-lg hover:bg-white/5 transition-colors"
+                                        >
+                                            <SyllableCountIcon active={showSyllableCount} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsModalOpen(true)}
+                                            aria-label="Add section"
+                                            className="p-2 rounded-lg hover:bg-white/5 transition-colors text-gray-400 hover:text-white"
+                                        >
+                                            <PlusIcon />
+                                        </button>
                                     </div>
-                                );
-                            })}
-                        </div>
+                                    <SectionModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onAddSection={addSection} />
+                                </div>
+
+                                <div className="flex-grow overflow-y-auto custom-scrollbar" onScroll={clearRhymePopupAndTimeout}>
+                                    <div className="pt-6 px-4 md:px-8 pb-32">
+                                        {song.sections.map((section, index) => {
+                                            const isDeleting = deletingSections.has(section.id);
+                                            const currentTranslateX = (dragState?.sectionId === section.id) ? dragState.translateX : 0;
+
+                                            const isBeingDragged = reorderState?.sectionId === section.id;
+                                            let containerStyle = {};
+                                            let containerClasses = `transition-transform duration-300 ease-in-out`;
+
+                                            if (reorderState) {
+                                                const { startIndex, currentY, initialY, draggedElHeight } = reorderState;
+                                                const finalDropIndex = dropIndex ?? startIndex;
+
+                                                if (isBeingDragged) {
+                                                    containerStyle = {
+                                                        transform: `translateY(${currentY - initialY}px)`,
+                                                        zIndex: 50,
+                                                        cursor: 'grabbing',
+                                                    };
+                                                    containerClasses = '';
+                                                } else {
+                                                    let shiftAmount = 0;
+                                                    if (startIndex < finalDropIndex && index > startIndex && index <= finalDropIndex) {
+                                                        shiftAmount = -draggedElHeight - (isUnstructured ? 24 : 32);
+                                                    } else if (startIndex > finalDropIndex && index < startIndex && index >= finalDropIndex) {
+                                                        shiftAmount = draggedElHeight + (isUnstructured ? 24 : 32);
+                                                    }
+                                                    if (shiftAmount !== 0) {
+                                                        containerStyle = { transform: `translateY(${shiftAmount}px)` };
+                                                    }
+                                                }
+                                            }
+
+                                            return (
+                                                <div key={section.id}>
+                                                    <div
+                                                        className={`transition-all duration-500 ease-in-out ${isUnstructured ? 'mb-0' : 'mb-8'} ${isDeleting ? 'max-h-0 opacity-0 !mb-0' : 'max-h-[600px]'}`}
+                                                    >
+                                                        <div
+                                                            ref={el => { sectionContainerRefs.current[section.id] = el; }}
+                                                            className={`relative ${containerClasses}`}
+                                                            style={containerStyle}
+                                                            onMouseDown={(e) => handleGestureStart(e, section.id)}
+                                                            onTouchStart={(e) => handleGestureStart(e, section.id)}
+                                                        >
+                                                            <div className={`absolute inset-0 rounded-xl flex justify-end items-center pr-8 pointer-events-none ${!isUnstructured ? 'bg-red-900/50' : ''}`}>
+                                                                {!isUnstructured && <TrashIcon />}
+                                                            </div>
+
+                                                            <div
+                                                                style={{ transform: `translateX(${currentTranslateX}px)` }}
+                                                                className={`relative transition-all duration-500 ease-in-out will-change-[padding,background-color,border,box-shadow] ${dragState?.sectionId === section.id && dragState?.isDragging ? '!duration-0' : ''}
+                                                                ${isUnstructured
+                                                                        ? 'bg-transparent border-l-2 border-transparent pl-4 hover:border-white/10 mb-6'
+                                                                        : 'bg-[#18181b] border border-white/5 rounded-xl p-6 shadow-lg hover:border-white/10 hover:shadow-xl'
+                                                                    }
+                                                                ${isBeingDragged ? 'shadow-2xl scale-[1.02] z-50 bg-zinc-800' : ''}
+                                                                ${activeSectionId === section.id && !isUnstructured ? 'ring-1 ring-white/10 bg-[#1c1c1f]' : ''}
+                                                                `}
+                                                            >
+                                                                <div className="flex items-center justify-between mb-4">
+                                                                    <div className="flex items-center gap-3 group">
+                                                                        <h3
+                                                                            contentEditable
+                                                                            suppressContentEditableWarning
+                                                                            dir="ltr"
+                                                                            spellCheck={false}
+                                                                            onInput={(e) => updateSectionTitle(section.id, e.currentTarget.innerText)}
+                                                                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLHeadingElement).blur(); } }}
+                                                                            onPaste={handleTitlePaste}
+                                                                            className={`w-fit font-bold tracking-wide text-xs uppercase outline-none rounded-sm px-1 -ml-1 transition-colors
+                                                                                ${isUnstructured ? 'text-gray-500 focus:text-gray-300' : 'text-gray-400 bg-white/5 py-0.5 px-2'}`}
+                                                                        >{section.title}</h3>
+                                                                        <button
+                                                                            ref={el => { geminiIconRefs.current[section.id] = el; }}
+                                                                            type="button"
+                                                                            aria-label="Gemini Actions"
+                                                                            onClick={(e) => handleGeminiIconClick(e, section.id)}
+                                                                            className={`transition-all duration-300 ease-in-out text-blue-400 hover:text-blue-300 ${activeSectionId === section.id ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}
+                                                                            tabIndex={activeSectionId === section.id ? 0 : -1}
+                                                                        >
+                                                                            <GeminiIcon className="h-4 w-4" />
+                                                                        </button>
+                                                                    </div>
+                                                                    {!isUnstructured && (
+                                                                        <div className="flex items-center space-x-1">
+                                                                            {section.takes.length > 0 && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => setActivePlayerSectionId(section.id)}
+                                                                                    className="bg-zinc-800/80 border border-white/5 rounded-full flex items-center space-x-1.5 px-3 py-1 text-xs font-medium text-gray-300 hover:bg-zinc-700 hover:text-white transition-all"
+                                                                                    aria-label={`Show ${section.takes.length} audio takes`}
+                                                                                >
+                                                                                    <MusicNoteIcon />
+                                                                                    <span>{section.takes.length}</span>
+                                                                                </button>
+                                                                            )}
+                                                                            <button
+                                                                                type="button"
+                                                                                aria-label="Record audio"
+                                                                                onClick={() => handleRecordClick(section.id)}
+                                                                                className="p-2 text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded-full transition-all"
+                                                                            >
+                                                                                <MicrophoneIcon />
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+
+                                                                <div className="flex items-start">
+                                                                    <div
+                                                                        ref={el => { sectionEditorRefs.current[section.id] = el; }}
+                                                                        contentEditable
+                                                                        data-placeholder="Start writing..."
+                                                                        data-section-id={section.id}
+                                                                        onFocus={() => { clearRhymePopupAndTimeout(); setActiveSectionId(section.id); }}
+                                                                        onBlur={clearRhymePopupAndTimeout}
+                                                                        onMouseDown={clearRhymePopupAndTimeout}
+                                                                        onTouchStart={clearRhymePopupAndTimeout}
+                                                                        onMouseUp={handleSelection}
+                                                                        onTouchEnd={handleSelection}
+                                                                        onInput={e => handleLyricsInput(section.id, e.currentTarget as HTMLDivElement)}
+                                                                        onPaste={handlePaste}
+                                                                        className="lyric-editor flex-grow outline-none text-gray-200 text-lg leading-relaxed tracking-normal"
+                                                                    />
+                                                                    {/* Syllable Count Column */}
+                                                                    <div className={`pl-4 w-14 text-right transition-opacity duration-300 flex flex-col items-end gap-[0px] ${showSyllableCount ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                                                                        {section.lyrics.map((lyric, lineIndex) => {
+                                                                            const counts = (lineCountsBySection[section.id] || [])[lineIndex];
+
+                                                                            const renderPill = (val: number | null) => (
+                                                                                <div className="text-lg leading-relaxed flex items-center justify-end h-[1.75em]">
+                                                                                    {val !== null && val > 0 && (
+                                                                                        <span className="inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5 text-[10px] font-mono font-medium text-gray-400 bg-white/5 border border-white/5 rounded-full tabular-nums">
+                                                                                            {val}
+                                                                                        </span>
+                                                                                    )}
+                                                                                </div>
+                                                                            );
+
+                                                                            if (!lyric.html.trim()) {
+                                                                                return <div key={lyric.id} className="text-lg leading-relaxed">{'\u00A0'}</div>;
+                                                                            }
+
+                                                                            if (counts && counts.length > 1) {
+                                                                                return (
+                                                                                    <div key={lyric.id}>
+                                                                                        {counts.map((count, wrapIndex) => (
+                                                                                            <React.Fragment key={wrapIndex}>
+                                                                                                {renderPill(count)}
+                                                                                            </React.Fragment>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                );
+                                                                            }
+
+                                                                            const fallbackCount = getSyllableCount(lyric.html);
+                                                                            const singleCount = (counts && counts.length === 1) ? counts[0] : fallbackCount;
+                                                                            return (
+                                                                                <React.Fragment key={lyric.id}>
+                                                                                    {renderPill(singleCount)}
+                                                                                </React.Fragment>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        </main>
+
+                        {/* Modals and Overlays */}
+                        {geminiModalSectionId && anchorEl && (
+                            <GeminiActionModal
+                                anchorEl={anchorEl}
+                                onClose={() => setGeminiModalSectionId(null)}
+                                onAction={handleGeminiAction}
+                            />
+                        )}
+                        {rhymePopup && <RhymePopup {...rhymePopup} />}
+                        {recordingState.status === 'recording' && recordingState.startTime && (
+                            <AudioRecorder
+                                startTime={recordingState.startTime}
+                                onSave={() => handleStopRecording(true)}
+                                onCancel={() => handleStopRecording(false)}
+                            />
+                        )}
+                        {activePlayerSection && (
+                            <BottomTakesPlayer
+                                className="takes-player-overlay"
+                                section={activePlayerSection}
+                                onClose={() => setActivePlayerSectionId(null)}
+                                onDeleteTake={handleDeleteTake}
+                            />
+                        )}
+                        {isInitialState && recordingState.status !== 'recording' && <InitialControls onAddBeat={handleAddBeat} />}
+
+                        {beat && (
+                            <MasterPlayer beat={beat} onRemoveBeat={handleRemoveBeat} />
+                        )}
                     </div>
-                </div>
-            </main>
-
-            {/* Modals and Overlays */}
-            {geminiModalSectionId && anchorEl && (
-                <GeminiActionModal
-                    anchorEl={anchorEl}
-                    onClose={() => setGeminiModalSectionId(null)}
-                    onAction={handleGeminiAction}
-                />
-            )}
-            {rhymePopup && <RhymePopup {...rhymePopup} />}
-            {recordingState.status === 'recording' && recordingState.startTime && (
-                <AudioRecorder
-                    startTime={recordingState.startTime}
-                    onSave={() => handleStopRecording(true)}
-                    onCancel={() => handleStopRecording(false)}
-                />
-            )}
-            {activePlayerSection && (
-                <BottomTakesPlayer
-                    className="takes-player-overlay"
-                    section={activePlayerSection}
-                    onClose={() => setActivePlayerSectionId(null)}
-                    onDeleteTake={handleDeleteTake}
-                />
-            )}
-            {isInitialState && recordingState.status !== 'recording' && <InitialControls onAddBeat={handleAddBeat} />}
-
-            {beat && (
-                <MasterPlayer beat={beat} onRemoveBeat={handleRemoveBeat} />
-            )}
+                )}
+            </AnimatePresence>
         </div>
     );
 };
