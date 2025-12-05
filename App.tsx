@@ -11,7 +11,6 @@ import BottomTakesPlayer from './components/BottomTakesPlayer';
 import InitialControls from './components/InitialControls';
 import MasterPlayer from './components/MasterPlayer';
 import HomeScreen from './components/HomeScreen';
-import EditorControlPill from './components/EditorControlPill';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronLeft } from 'lucide-react';
 
@@ -731,22 +730,50 @@ const App: React.FC = () => {
                             <div className="h-full flex flex-col overflow-hidden relative">
 
                                 {/* Header / Toolbar */}
-                                <div className="relative flex items-center gap-4 px-6 py-5 flex-shrink-0 z-10">
-                                    <button
-                                        onClick={() => handleNavigate('home')}
-                                        className="text-gray-400 hover:text-white transition-colors p-2 -ml-2 rounded-full hover:bg-white/5"
-                                        aria-label="Go back to projects"
-                                    >
-                                        <ChevronLeft size={24} />
-                                    </button>
-                                    <div className="flex-grow">
-                                        <input
-                                            value={activeProjectTitle}
-                                            onChange={(e) => setActiveProjectTitle(e.target.value)}
-                                            className="bg-transparent text-3xl font-extrabold w-full outline-none placeholder-gray-700 tracking-tight text-white"
-                                            placeholder="Untitled Song"
-                                        />
+                                <div className="relative px-6 py-5 flex-shrink-0 z-10">
+                                    {/* Top row: Back button + Controls on right */}
+                                    <div className="flex items-center justify-between mb-4">
+                                        <button
+                                            onClick={() => handleNavigate('home')}
+                                            className="text-gray-400 hover:text-white transition-colors p-2 -ml-2 rounded-full hover:bg-white/5"
+                                            aria-label="Go back to projects"
+                                        >
+                                            <ChevronLeft size={24} />
+                                        </button>
+                                        <div className="flex items-center space-x-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsUnstructured(prev => !prev)}
+                                                aria-label="Toggle unstructured view"
+                                                className={`p-2 rounded-lg hover:bg-white/5 transition-colors ${isUnstructured ? 'text-white' : 'text-gray-500'}`}
+                                            >
+                                                <span className="text-sm font-bold">U</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowSyllableCount(prev => !prev)}
+                                                aria-label="Toggle syllable count"
+                                                className={`p-2 rounded-lg hover:bg-white/5 transition-colors ${showSyllableCount ? 'text-white' : 'text-gray-500'}`}
+                                            >
+                                                <span className="text-sm font-bold">S</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsModalOpen(true)}
+                                                aria-label="Add section"
+                                                className="p-2 rounded-lg hover:bg-white/5 transition-colors text-gray-400 hover:text-white"
+                                            >
+                                                <span className="text-lg">+</span>
+                                            </button>
+                                        </div>
                                     </div>
+                                    {/* Title below back button */}
+                                    <input
+                                        value={activeProjectTitle}
+                                        onChange={(e) => setActiveProjectTitle(e.target.value)}
+                                        className="bg-transparent text-3xl font-extrabold w-full outline-none placeholder-gray-700 tracking-tight text-white"
+                                        placeholder="Untitled Song"
+                                    />
                                     <SectionModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onAddSection={addSection} />
                                 </div>
 
@@ -927,15 +954,6 @@ const App: React.FC = () => {
                                 </div>
                             </div>
                         </main>
-
-                        {/* Control Pill */}
-                        <EditorControlPill
-                            isUnstructured={isUnstructured}
-                            showSyllableCount={showSyllableCount}
-                            onToggleUnstructured={() => setIsUnstructured(prev => !prev)}
-                            onToggleSyllableCount={() => setShowSyllableCount(prev => !prev)}
-                            onAddSection={() => setIsModalOpen(true)}
-                        />
 
                         {/* Modals and Overlays */}
                         {geminiModalSectionId && anchorEl && (
