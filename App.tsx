@@ -9,6 +9,7 @@ import RhymePopup from './components/RhymePopup';
 import AudioRecorder from './components/AudioRecorder';
 import BottomTakesPlayer from './components/BottomTakesPlayer';
 import InitialControls from './components/InitialControls';
+import FlowScreen from './components/FlowScreen';
 import MasterPlayer from './components/MasterPlayer';
 import HomeScreen from './components/HomeScreen';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -72,13 +73,14 @@ const getAudioDuration = (blob: Blob): Promise<number> => {
 
 const App: React.FC = () => {
     // Navigation state
-    const [currentScreen, setCurrentScreen] = useState<'home' | 'editor'>('home');
+    const [currentScreen, setCurrentScreen] = useState<'home' | 'editor' | 'flow'>('home');
     const [activeProjectTitle, setActiveProjectTitle] = useState('');
     const [direction, setDirection] = useState(0); // 1 = forward, -1 = back
     const [projects, setProjects] = useState<any[]>([]);
 
     const [song, setSong] = useState<Song>(initialSong);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [flowScreenState, setFlowScreenState] = useState<'hidden' | 'peeking' | 'expanded'>('hidden');
     const [isUnstructured, setIsUnstructured] = useState(true);
     const [showSyllableCount, setShowSyllableCount] = useState(false);
     const sectionEditorRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
@@ -129,6 +131,47 @@ const App: React.FC = () => {
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
     const streamRef = useRef<MediaStream | null>(null);
+
+    // Global Navigation Gesture State
+    const globalTouchStart = useRef<{ x: number, y: number } | null>(null);
+
+    const handleGlobalTouchStart = (e: React.TouchEvent) => {
+        globalTouchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    };
+
+    const handleGlobalTouchEnd = (e: React.TouchEvent) => {
+        if (!globalTouchStart.current) return;
+
+        const diffX = e.changedTouches[0].clientX - globalTouchStart.current.x;
+        const diffY = e.changedTouches[0].clientY - globalTouchStart.current.y;
+
+        // Horizontal swipe detection (ignore if vertical scroll is dominant)
+        if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 50) {
+            if (diffX < 0) {
+                // Swipe Left (Right-to-Left) -> Forward
+                if (currentScreen === 'home') {
+                    setDirection(1);
+                    setCurrentScreen('editor');
+                } else if (currentScreen === 'editor') {
+                    // Check for Right Edge Swipe -> Flow
+                    if (globalTouchStart.current.x > window.innerWidth * 0.8) {
+                        setDirection(1);
+                        setCurrentScreen('flow');
+                    }
+                }
+            } else {
+                // Swipe Right (Left-to-Right) -> Backward
+                if (currentScreen === 'editor') {
+                    setDirection(-1);
+                    setCurrentScreen('home');
+                } else if (currentScreen === 'flow') {
+                    setDirection(-1);
+                    setCurrentScreen('editor');
+                }
+            }
+        }
+        globalTouchStart.current = null;
+    };
 
     const [showSplash, setShowSplash] = useState(true);
 
@@ -338,7 +381,7 @@ const App: React.FC = () => {
 
         if (longPressTimeout.current) return;
 
-        const translateX = Math.min(0, diff);
+        const translateX = diff; // Allow both directions
         setDragState(prev => prev ? { ...prev, translateX } : null);
     }, [dragState, reorderState, song.sections]);
 
@@ -370,11 +413,32 @@ const App: React.FC = () => {
         const SWIPE_THRESHOLD = -window.innerWidth / 3.5;
 
         if (translateX < SWIPE_THRESHOLD) {
-            setDeletingSections(prev => new Set(prev).add(sectionId));
-            const timeoutId = setTimeout(() => {
-                deleteSection(sectionId);
-            }, 500);
-            deleteTimeouts.current.set(sectionId, timeoutId);
+            // Swipe Left
+            if (currentScreen === 'editor') {
+                // Check for Right Edge Swipe -> Go to Flow
+                const isRightEdgeSwipe = dragState.startX > window.innerWidth * 0.8;
+
+                if (isRightEdgeSwipe) {
+                    setDirection(1);
+                    setCurrentScreen('flow');
+                } else {
+                    // Normal Card Swipe -> Delete
+                    setDeletingSections(prev => new Set(prev).add(sectionId));
+                    const timeoutId = setTimeout(() => {
+                        deleteSection(sectionId);
+                    }, 500);
+                    deleteTimeouts.current.set(sectionId, timeoutId);
+                }
+            }
+        } else if (translateX > -SWIPE_THRESHOLD) {
+            // Swipe Right (Left-to-Right)
+            if (currentScreen === 'flow') {
+                setDirection(-1);
+                setCurrentScreen('editor');
+            } else if (currentScreen === 'editor') {
+                setDirection(-1);
+                setCurrentScreen('home');
+            }
         }
 
         setDragState(null);
@@ -708,6 +772,9 @@ const App: React.FC = () => {
                         initial="initial"
                         animate="animate"
                         exit="exit"
+                        onTouchStart={handleGlobalTouchStart}
+                        onTouchEnd={handleGlobalTouchEnd}
+                        className="h-full"
                     >
                         <HomeScreen onNavigate={handleNavigate} projects={projects} />
                     </motion.div>
@@ -720,6 +787,8 @@ const App: React.FC = () => {
                         animate="animate"
                         exit="exit"
                         className={`h-[100dvh] flex flex-col lyriq-player-view ${isInitialState ? 'empty-state' : ''}`}
+                        onTouchStart={handleGlobalTouchStart}
+                        onTouchEnd={handleGlobalTouchEnd}
                     >
                         <main className="flex-grow py-8 max-w-screen-xl mx-auto px-4 w-full h-full relative">
                             {/* Glass Container for the Notepad */}
@@ -982,6 +1051,33 @@ const App: React.FC = () => {
                         {beat && (
                             <MasterPlayer beat={beat} onRemoveBeat={handleRemoveBeat} />
                         )}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+            {/* Flow Screen Page */}
+            <AnimatePresence custom={direction} mode="popLayout">
+                {currentScreen === 'flow' && (
+                    <motion.div
+                        key="flow"
+                        custom={direction}
+                        variants={pageVariants}
+                        initial="initial"
+                        animate="animate"
+                        exit="exit"
+                        className="fixed inset-0 z-50 bg-black"
+                    >
+                        <FlowScreen
+                            viewState="expanded" // Always expanded as a page, or manage internal state
+                            onViewStateChange={() => { }} // Internal management or back nav
+                            songTitle={activeProjectTitle || "Untitled Song"}
+                            lyrics={song.sections.flatMap(s => s.lyrics)}
+                            beatUrl={beat?.url}
+                            onBeatUpload={handleAddBeat}
+                            onBack={() => {
+                                setDirection(-1);
+                                setCurrentScreen('editor');
+                            }}
+                        />
                     </motion.div>
                 )}
             </AnimatePresence>
