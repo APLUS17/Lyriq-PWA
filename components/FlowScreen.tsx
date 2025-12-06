@@ -309,8 +309,8 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                 dragConstraints={{ top: 0, bottom: 0 }}
                 dragElastic={0.2}
                 onDragEnd={handleDragEnd}
-                className="absolute bottom-0 left-0 right-0 z-50 flex flex-col bg-zinc-900 rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.8)] overflow-hidden border-t border-white/10"
-                style={{ height: viewState === 'expanded' ? '92vh' : 'auto' }}
+                className="absolute bottom-0 left-0 right-0 z-50 flex flex-col bg-zinc-900 rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.8)] overflow-y-auto border-t border-white/10"
+                style={{ height: viewState === 'expanded' ? '30vh' : 'auto', maxHeight: viewState === 'expanded' ? '35vh' : 'auto' }}
             >
                 {/* Handle Bar */}
                 <div className="w-full flex justify-center pt-3 pb-1 cursor-grab active:cursor-grabbing" onClick={() => viewState === 'peeking' && onViewStateChange('expanded')}>
