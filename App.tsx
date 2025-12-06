@@ -17,28 +17,28 @@ import { ChevronLeft } from 'lucide-react';
 
 // Page animation variants
 const pageVariants = {
-  initial: (direction: number) => ({
-    x: direction > 0 ? 100 : -100,
-    opacity: 0,
-    scale: 0.95,
-    filter: "blur(10px)"
-  }),
-  animate: {
-    x: 0,
-    opacity: 1,
-    scale: 1,
-    filter: "blur(0px)",
-    transition: {
-      x: { type: "spring", stiffness: 300, damping: 30 },
-      opacity: { duration: 0.2 }
-    }
-  },
-  exit: (direction: number) => ({
-    x: direction < 0 ? 100 : -100,
-    opacity: 0,
-    scale: 0.95,
-    filter: "blur(10px)"
-  }),
+    initial: (direction: number) => ({
+        x: direction > 0 ? 100 : -100,
+        opacity: 0,
+        scale: 0.95,
+        filter: "blur(10px)"
+    }),
+    animate: {
+        x: 0,
+        opacity: 1,
+        scale: 1,
+        filter: "blur(0px)",
+        transition: {
+            x: { type: "spring", stiffness: 300, damping: 30 },
+            opacity: { duration: 0.2 }
+        }
+    },
+    exit: (direction: number) => ({
+        x: direction < 0 ? 100 : -100,
+        opacity: 0,
+        scale: 0.95,
+        filter: "blur(10px)"
+    }),
 };
 
 const initialSectionId = crypto.randomUUID();
@@ -73,13 +73,9 @@ const getAudioDuration = (blob: Blob): Promise<number> => {
 const App: React.FC = () => {
     // Navigation state
     const [currentScreen, setCurrentScreen] = useState<'home' | 'editor'>('home');
-    const [activeProjectTitle, setActiveProjectTitle] = useState('Untitled Song');
+    const [activeProjectTitle, setActiveProjectTitle] = useState('');
     const [direction, setDirection] = useState(0); // 1 = forward, -1 = back
-    const [projects, setProjects] = useState([
-        { id: 1, title: 'Lyric Notes App', time: '2 days', gradient: 'bg-gradient-to-tr from-rose-400 to-pink-500' },
-        { id: 2, title: 'Whoa', time: '3 months', gradient: 'bg-gradient-to-tr from-indigo-400 to-purple-500' },
-        { id: 3, title: 'New Project', time: '4 months', gradient: 'bg-gradient-to-tr from-yellow-300 to-pink-300' },
-    ]);
+    const [projects, setProjects] = useState<any[]>([]);
 
     const [song, setSong] = useState<Song>(initialSong);
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -732,46 +728,48 @@ const App: React.FC = () => {
                                 {/* Header / Toolbar */}
                                 <div className="relative px-6 py-5 flex-shrink-0 z-10">
                                     {/* Top row: Back button + Controls on right */}
-                                    <div className="flex items-center justify-between mb-4">
+                                    <div className="flex items-center justify-between mb-6">
                                         <button
                                             onClick={() => handleNavigate('home')}
-                                            className="text-gray-400 hover:text-white transition-colors p-2 -ml-2 rounded-full hover:bg-white/5"
+                                            className="bg-zinc-800/40 backdrop-blur-md border border-white/10 text-gray-400 hover:text-white transition-colors p-2 rounded-full hover:bg-white/5"
                                             aria-label="Go back to projects"
                                         >
-                                            <ChevronLeft size={24} />
+                                            <ChevronLeft size={20} />
                                         </button>
-                                        <div className="flex items-center space-x-2">
+
+                                        <div className="flex items-center bg-zinc-800/40 backdrop-blur-md border border-white/10 rounded-full p-1">
                                             <button
                                                 type="button"
                                                 onClick={() => setIsUnstructured(prev => !prev)}
                                                 aria-label="Toggle unstructured view"
-                                                className={`p-2 rounded-lg hover:bg-white/5 transition-colors ${isUnstructured ? 'text-white' : 'text-gray-500'}`}
+                                                className={`p-2 rounded-full hover:bg-white/10 transition-colors ${isUnstructured ? 'text-white bg-white/10' : 'text-gray-400'}`}
                                             >
-                                                <span className="text-sm font-bold">U</span>
+                                                <span className="text-xs font-bold w-5 h-5 flex items-center justify-center">U</span>
                                             </button>
                                             <button
                                                 type="button"
                                                 onClick={() => setShowSyllableCount(prev => !prev)}
                                                 aria-label="Toggle syllable count"
-                                                className={`p-2 rounded-lg hover:bg-white/5 transition-colors ${showSyllableCount ? 'text-white' : 'text-gray-500'}`}
+                                                className={`p-2 rounded-full hover:bg-white/10 transition-colors ${showSyllableCount ? 'text-white bg-white/10' : 'text-gray-400'}`}
                                             >
-                                                <span className="text-sm font-bold">S</span>
+                                                <span className="text-xs font-bold w-5 h-5 flex items-center justify-center">S</span>
                                             </button>
                                             <button
                                                 type="button"
                                                 onClick={() => setIsModalOpen(true)}
                                                 aria-label="Add section"
-                                                className="p-2 rounded-lg hover:bg-white/5 transition-colors text-gray-400 hover:text-white"
+                                                className="p-2 rounded-full hover:bg-white/10 transition-colors text-gray-400 hover:text-white"
                                             >
-                                                <span className="text-lg">+</span>
+                                                <span className="text-lg leading-none w-5 h-5 flex items-center justify-center pb-0.5">+</span>
                                             </button>
                                         </div>
                                     </div>
+
                                     {/* Title below back button */}
                                     <input
                                         value={activeProjectTitle}
                                         onChange={(e) => setActiveProjectTitle(e.target.value)}
-                                        className="bg-transparent text-3xl font-extrabold w-full outline-none placeholder-gray-700 tracking-tight text-white"
+                                        className={`bg-transparent text-3xl font-extrabold w-full outline-none tracking-tight transition-colors ${activeProjectTitle ? 'text-white' : 'text-gray-500'} placeholder-gray-500`}
                                         placeholder="Untitled Song"
                                     />
                                     <SectionModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onAddSection={addSection} />
@@ -814,7 +812,7 @@ const App: React.FC = () => {
                                             return (
                                                 <div key={section.id}>
                                                     <div
-                                                        className={`transition-all duration-500 ease-in-out ${isUnstructured ? 'mb-0' : 'mb-8'} ${isDeleting ? 'max-h-0 opacity-0 !mb-0' : 'max-h-[600px]'}`}
+                                                        className={`transition-all duration-700 ease-[cubic-bezier(0.25,0.1,0.25,1.0)] ${isUnstructured ? 'mb-0' : 'mb-8'} ${isDeleting ? 'max-h-0 opacity-0 !mb-0' : 'max-h-[800px]'}`}
                                                     >
                                                         <div
                                                             ref={el => { sectionContainerRefs.current[section.id] = el; }}
@@ -904,14 +902,14 @@ const App: React.FC = () => {
                                                                         className="lyric-editor flex-grow outline-none text-gray-200 text-lg leading-relaxed tracking-normal"
                                                                     />
                                                                     {/* Syllable Count Column */}
-                                                                    <div className={`pl-4 w-14 text-right transition-opacity duration-300 flex flex-col items-end gap-[0px] ${showSyllableCount ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                                                                    <div className={`pl-4 w-14 text-right transition-opacity duration-1000 flex flex-col items-end gap-[0px] ${showSyllableCount ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                                                                         {section.lyrics.map((lyric, lineIndex) => {
                                                                             const counts = (lineCountsBySection[section.id] || [])[lineIndex];
 
                                                                             const renderPill = (val: number | null) => (
                                                                                 <div className="text-lg leading-relaxed flex items-center justify-end h-[1.75em]">
                                                                                     {val !== null && val > 0 && (
-                                                                                        <span className="inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5 text-[10px] font-mono font-medium text-gray-400 bg-white/5 border border-white/5 rounded-full tabular-nums">
+                                                                                        <span className="inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5 text-[10px] font-mono font-medium text-gray-500 tabular-nums">
                                                                                             {val}
                                                                                         </span>
                                                                                     )}

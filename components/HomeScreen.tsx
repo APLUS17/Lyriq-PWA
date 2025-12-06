@@ -40,12 +40,7 @@ const HomeScreen = React.forwardRef<HTMLDivElement, HomeScreenProps>(({ onNaviga
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
   // Dummy Data if none provided
-  const dummyProjects: Project[] = [
-    { id: 1, title: 'Lyric Notes App', time: '2 days', gradient: 'bg-gradient-to-tr from-rose-400 to-pink-500' },
-    { id: 2, title: 'Whoa', time: '3 months', gradient: 'bg-gradient-to-tr from-indigo-400 to-purple-500' },
-    { id: 3, title: 'New Project', time: '4 months', gradient: 'bg-gradient-to-tr from-yellow-300 to-pink-300' },
-  ];
-  const currentProjects = projects.length > 0 ? projects : dummyProjects;
+  const currentProjects = projects;
   const isEmpty = currentProjects.length === 0;
 
   // Pull to search logic
@@ -80,7 +75,7 @@ const HomeScreen = React.forwardRef<HTMLDivElement, HomeScreenProps>(({ onNaviga
           {/* Header */}
           <div className="px-6 pt-12 pb-6 flex justify-between items-center w-full mx-auto">
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-sans font-extrabold tracking-tight">Lyriq</h1>
+              <h1 className="text-4xl font-black uppercase tracking-tighter">SONGS</h1>
             </div>
             <div className="h-9 w-9 rounded-full bg-pink-400 flex items-center justify-center text-xs font-bold text-white border-2 border-black">
               M
@@ -96,9 +91,10 @@ const HomeScreen = React.forwardRef<HTMLDivElement, HomeScreenProps>(({ onNaviga
                 className="flex flex-col items-center gap-6 mt-16"
               >
                 {/* Empty State */}
-                <div className="text-center">
-                  <h3 className="text-lg font-medium text-gray-400">Start building</h3>
-                  <h3 className="text-lg font-medium text-gray-400">something real.</h3>
+                <div className="text-center max-w-[300px]">
+                  <h3 className="text-3xl font-black uppercase text-zinc-800 leading-tight tracking-tighter">
+                    READY TO WRITE YOUR FIRST SONG?
+                  </h3>
                 </div>
               </motion.div>
             ) : (
