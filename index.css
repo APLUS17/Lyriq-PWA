@@ -120,3 +120,24 @@ html {
 .animate-scale-in {
   animation: scaleIn 0.2s ease-out forwards;
 }
+
+/* Lyriq Player View - scroll padding for centering active line */
+.lyriq-player-view {
+  scroll-padding-top: 40vh;
+}
+
+/* Lyriq Line styling */
+.lyriq-line {
+  transition: transform 0.35s, opacity 0.35s, color 0.35s;
+}
+
+.lyriq-line.highlighted-line {
+  transform: scale(1.02);
+  opacity: 1;
+}
+
+/* Lyriq Word highlighting (karaoke effect) */
+.lyriq-word.highlighted-word {
+  color: #ec4899;
+  /* pink-500 to match theme */
+}

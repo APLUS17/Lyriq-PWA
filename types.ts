@@ -23,3 +23,15 @@ export interface Section {
 export interface Song {
   sections: Section[];
 }
+
+export interface TimedWord {
+  word: string;
+  start: number;  // seconds
+  end: number;    // seconds
+}
+
+export interface TimedLine {
+  text: string;
+  start: number;
+  end: number;
+}
