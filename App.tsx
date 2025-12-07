@@ -73,7 +73,7 @@ const getAudioDuration = (blob: Blob): Promise<number> => {
 
 const App: React.FC = () => {
     // Navigation state
-    const [currentScreen, setCurrentScreen] = useState<'home' | 'editor' | 'flow'>('flow');
+    const [currentScreen, setCurrentScreen] = useState<'home' | 'editor' | 'flow'>('home');
     const [activeProjectTitle, setActiveProjectTitle] = useState('');
     const [direction, setDirection] = useState(0); // 1 = forward, -1 = back
     const [projects, setProjects] = useState<any[]>([]);
