@@ -3,6 +3,9 @@ import { Play, Pause, Mic, Music, ChevronDown, Rewind, FastForward, Volume2 } fr
 import { motion, PanInfo } from 'framer-motion';
 import { TimedWord, TimedLine } from '../types';
 import { findLineIndexAtTime, HIGHLIGHT_LOOKAHEAD } from '../services/lyriqTranscriptionService';
+import { drawCenteredWaveform, decodeAudioFromUrl } from '../services/canvasWaveformService';
+import { playBothTracks, pauseBothTracks, seekBothTracks } from '../services/audioSyncService';
+import { getTimeFromEvent } from '../services/scrubbingService';
 
 export type FlowScreenState = 'hidden' | 'peeking' | 'expanded';
 
@@ -26,6 +29,10 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
 
+    // Recording state
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
+
     // Synced Lyrics State
     const [currentLineIndex, setCurrentLineIndex] = useState(0);
     const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
@@ -33,12 +40,33 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
     // Refs
     const audioContextRef = useRef<AudioContext | null>(null);
     const beatPlayerRef = useRef<HTMLAudioElement | null>(null);
+    const vocalPlayerRef = useRef<HTMLAudioElement | null>(null);
     const beatSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+    const vocalSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
     const animationFrameRef = useRef<number | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const lineElementsRef = useRef<(HTMLParagraphElement | null)[]>([]);
     const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
     const scrollTimeoutRef = useRef<number | null>(null);
+    const beatWaveformCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const vocalWaveformCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const waveformAnimationRef = useRef<number | null>(null);
+
+    // Waveform state
+    const [beatAudioBuffer, setBeatAudioBuffer] = useState<AudioBuffer | null>(null);
+    const [vocalAudioBuffer, setVocalAudioBuffer] = useState<AudioBuffer | null>(null);
+
+    // Vocal track state
+    const [vocalUrl, setVocalUrl] = useState<string | null>(null);
+
+    // Scrubbing state
+    const [isScrubbing, setIsScrubbing] = useState(false);
+    const waveformContainerRef = useRef<HTMLDivElement | null>(null);
+
+    // Volume mixer state
+    const [showVolumeMixer, setShowVolumeMixer] = useState(false);
+    const [beatVolume, setBeatVolume] = useState(1.0);
+    const [vocalVolume, setVocalVolume] = useState(1.0);
 
     // Initialize Audio Context
     const initAudioContext = useCallback(() => {
@@ -70,7 +98,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
         };
     }, [isPlaying]);
 
-    // Update duration when beat loads
+    // Update duration when beat loads and decode audio for waveform
     useEffect(() => {
         const audio = beatPlayerRef.current;
         const handleLoadedMetadata = () => {
@@ -81,12 +109,26 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
             audio.addEventListener('loadedmetadata', handleLoadedMetadata);
         }
 
+        // Decode audio for waveform rendering
+        if (beatUrl) {
+            const ctx = initAudioContext();
+            decodeAudioFromUrl(beatUrl, ctx)
+                .then(buffer => {
+                    setBeatAudioBuffer(buffer);
+                })
+                .catch(err => {
+                    console.error('Failed to decode audio for waveform:', err);
+                });
+        } else {
+            setBeatAudioBuffer(null);
+        }
+
         return () => {
             if (audio) {
                 audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
             }
         };
-    }, [beatUrl]);
+    }, [beatUrl, initAudioContext]);
 
     // Auto-scroll and highlighting effect
     useEffect(() => {
@@ -133,6 +175,81 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
         };
     }, []);
 
+    // Waveform rendering loop for beat track
+    useEffect(() => {
+        const canvas = beatWaveformCanvasRef.current;
+        if (!canvas || !beatAudioBuffer) return;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        // Set canvas size based on container
+        const resizeCanvas = () => {
+            const container = canvas.parentElement;
+            if (container) {
+                const dpr = window.devicePixelRatio || 1;
+                const rect = container.getBoundingClientRect();
+                canvas.width = rect.width * dpr;
+                canvas.height = rect.height * dpr;
+                ctx.scale(dpr, dpr);
+                canvas.style.width = `${rect.width}px`;
+                canvas.style.height = `${rect.height}px`;
+            }
+        };
+
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // Animation loop
+        const renderWaveform = () => {
+            const progress = duration > 0 ? currentTime / duration : 0;
+            drawCenteredWaveform(ctx, beatAudioBuffer, progress);
+            waveformAnimationRef.current = requestAnimationFrame(renderWaveform);
+        };
+
+        renderWaveform();
+
+        return () => {
+            window.removeEventListener('resize', resizeCanvas);
+            if (waveformAnimationRef.current) {
+                cancelAnimationFrame(waveformAnimationRef.current);
+            }
+        };
+    }, [beatAudioBuffer, currentTime, duration]);
+
+    // Waveform rendering loop for vocal track
+    useEffect(() => {
+        const canvas = vocalWaveformCanvasRef.current;
+        if (!canvas || !vocalAudioBuffer) return;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        // Set canvas size
+        const resizeCanvas = () => {
+            const container = canvas.parentElement;
+            if (container) {
+                const dpr = window.devicePixelRatio || 1;
+                const rect = container.getBoundingClientRect();
+                canvas.width = rect.width * dpr;
+                canvas.height = rect.height * dpr;
+                ctx.scale(dpr, dpr);
+                canvas.style.width = `${rect.width}px`;
+                canvas.style.height = `${rect.height}px`;
+            }
+        };
+
+        resizeCanvas();
+
+        // Render vocal waveform (static for now, will update with progress)
+        const progress = duration > 0 ? currentTime / duration : 0;
+        drawCenteredWaveform(ctx, vocalAudioBuffer, progress);
+
+        return () => {
+            // Cleanup
+        };
+    }, [vocalAudioBuffer, currentTime, duration]);
+
     // Toggle Playback
     const togglePlayback = async (e?: React.MouseEvent) => {
         e?.stopPropagation();
@@ -140,18 +257,29 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
         if (!ctx) return;
 
         if (isPlaying) {
-            beatPlayerRef.current?.pause();
+            pauseBothTracks(beatPlayerRef.current, vocalPlayerRef.current);
             setIsPlaying(false);
         } else {
             // Only try to connect the source if a beat is loaded
             if (beatPlayerRef.current && beatUrl) {
+                // Connect beat track to audio context
                 if (!beatSourceNodeRef.current) {
                     try {
                         beatSourceNodeRef.current = ctx.createMediaElementSource(beatPlayerRef.current);
                         beatSourceNodeRef.current.connect(ctx.destination);
                     } catch (e) { /* console.warn("Beat source already connected", e); */ }
                 }
-                await beatPlayerRef.current.play();
+
+                // Connect vocal track to audio context if exists
+                if (vocalPlayerRef.current && vocalUrl && !vocalSourceNodeRef.current) {
+                    try {
+                        vocalSourceNodeRef.current = ctx.createMediaElementSource(vocalPlayerRef.current);
+                        vocalSourceNodeRef.current.connect(ctx.destination);
+                    } catch (e) { /* console.warn("Vocal source already connected", e); */ }
+                }
+
+                // Play both tracks in sync
+                await playBothTracks(beatPlayerRef.current, vocalPlayerRef.current);
                 setIsPlaying(true);
             }
         }
@@ -159,19 +287,160 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
 
     const handleRewind = (e: React.MouseEvent) => {
         e.stopPropagation();
-        if (beatPlayerRef.current) beatPlayerRef.current.currentTime = Math.max(0, beatPlayerRef.current.currentTime - 15);
-        setCurrentTime(beatPlayerRef.current?.currentTime || 0);
+        if (beatPlayerRef.current) {
+            const newTime = Math.max(0, beatPlayerRef.current.currentTime - 15);
+            seekBothTracks(newTime, beatPlayerRef.current, vocalPlayerRef.current);
+            setCurrentTime(newTime);
+        }
     };
 
     const handleForward = (e: React.MouseEvent) => {
         e.stopPropagation();
-        if (beatPlayerRef.current) beatPlayerRef.current.currentTime = Math.min(beatPlayerRef.current.duration, beatPlayerRef.current.currentTime + 15);
-        setCurrentTime(beatPlayerRef.current?.currentTime || 0);
+        if (beatPlayerRef.current) {
+            const newTime = Math.min(beatPlayerRef.current.duration, beatPlayerRef.current.currentTime + 15);
+            seekBothTracks(newTime, beatPlayerRef.current, vocalPlayerRef.current);
+            setCurrentTime(newTime);
+        }
     };
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) onBeatUpload(file);
+    };
+
+    // Scrubbing handlers
+    const handleScrubStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+        if (!waveformContainerRef.current) return;
+        setIsScrubbing(true);
+
+        // Pause playback while scrubbing
+        if (isPlaying) {
+            pauseBothTracks(beatPlayerRef.current, vocalPlayerRef.current);
+        }
+    }, [isPlaying]);
+
+    const handleScrubMove = useCallback((e: MouseEvent | TouchEvent) => {
+        if (!isScrubbing || !waveformContainerRef.current) return;
+
+        const newTime = getTimeFromEvent(e, waveformContainerRef.current, duration);
+        setCurrentTime(newTime);
+        seekBothTracks(newTime, beatPlayerRef.current, vocalPlayerRef.current);
+    }, [isScrubbing, duration]);
+
+    const handleScrubEnd = useCallback(async () => {
+        if (!isScrubbing) return;
+        setIsScrubbing(false);
+
+        // Resume playback if it was playing before
+        if (isPlaying && beatPlayerRef.current) {
+            await playBothTracks(beatPlayerRef.current, vocalPlayerRef.current);
+        }
+    }, [isScrubbing, isPlaying]);
+
+    // Attach scrubbing event listeners
+    useEffect(() => {
+        if (isScrubbing) {
+            window.addEventListener('mousemove', handleScrubMove);
+            window.addEventListener('touchmove', handleScrubMove);
+            window.addEventListener('mouseup', handleScrubEnd);
+            window.addEventListener('touchend', handleScrubEnd);
+
+            return () => {
+                window.removeEventListener('mousemove', handleScrubMove);
+                window.removeEventListener('touchmove', handleScrubMove);
+                window.removeEventListener('mouseup', handleScrubEnd);
+                window.removeEventListener('touchend', handleScrubEnd);
+            };
+        }
+    }, [isScrubbing, handleScrubMove, handleScrubEnd]);
+
+    // Sync volumes to audio elements
+    useEffect(() => {
+        if (beatPlayerRef.current) {
+            beatPlayerRef.current.volume = beatVolume;
+        }
+    }, [beatVolume]);
+
+    useEffect(() => {
+        if (vocalPlayerRef.current) {
+            vocalPlayerRef.current.volume = vocalVolume;
+        }
+    }, [vocalVolume]);
+
+    // Toggle Recording
+    const toggleRecording = async () => {
+        if (isRecording) {
+            // Stop recording
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                mediaRecorderRef.current.stop();
+            }
+        } else {
+            // Start recording
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                // Determine best mime type
+                const mimeTypes = [
+                    'audio/webm;codecs=opus',
+                    'audio/mp4',
+                    'audio/webm'
+                ];
+
+                let selectedMimeType = '';
+                for (const type of mimeTypes) {
+                    if (MediaRecorder.isTypeSupported(type)) {
+                        selectedMimeType = type;
+                        break;
+                    }
+                }
+
+                const options = selectedMimeType ? { mimeType: selectedMimeType } : undefined;
+                mediaRecorderRef.current = new MediaRecorder(stream, options);
+                audioChunksRef.current = [];
+
+                mediaRecorderRef.current.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunksRef.current.push(event.data);
+                    }
+                };
+
+                mediaRecorderRef.current.onstop = async () => {
+                    // Create blob from recorded chunks
+                    const audioBlob = new Blob(audioChunksRef.current, {
+                        type: mediaRecorderRef.current?.mimeType || 'audio/webm'
+                    });
+
+                    // Create URL for playback
+                    const url = URL.createObjectURL(audioBlob);
+                    setVocalUrl(url);
+
+                    // Decode for waveform
+                    const ctx = initAudioContext();
+                    try {
+                        const buffer = await decodeAudioFromUrl(url, ctx);
+                        setVocalAudioBuffer(buffer);
+                    } catch (err) {
+                        console.error('Failed to decode vocal recording:', err);
+                    }
+
+                    // Stop all tracks in the stream
+                    stream.getTracks().forEach(track => track.stop());
+                    setIsRecording(false);
+                };
+
+                mediaRecorderRef.current.start();
+                setIsRecording(true);
+
+                // If beat is playing, keep it playing during recording
+                // Otherwise, start playing the beat for recording
+                if (!isPlaying && beatPlayerRef.current && beatUrl) {
+                    await togglePlayback();
+                }
+            } catch (error) {
+                console.error('Error accessing microphone:', error);
+                alert('Could not access microphone. Please ensure permissions are granted.');
+            }
+        }
     };
 
     // Helper to format time
@@ -208,7 +477,6 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
     if (viewState === 'hidden') return null;
 
     const hasBeatOrRecording = beatUrl || isRecording || isPlaying;
-    const progressPercent = (currentTime / (duration || 1)) * 100;
 
     // Extract plain text from lyrics (which may be Lyric objects)
     const lyricsText = lyrics.map(line => {
@@ -299,81 +567,43 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                 )}
             </div>
 
-            {/* Slide-Up Player Modal */}
-            <motion.div
-                initial="peeking"
-                animate={viewState}
-                variants={variants}
-                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                drag="y"
-                dragConstraints={{ top: 0, bottom: 0 }}
-                dragElastic={0.2}
-                onDragEnd={handleDragEnd}
-                className="absolute bottom-0 left-0 right-0 z-50 flex flex-col bg-zinc-900 rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.8)] overflow-hidden border-t border-white/10"
-                style={{ height: viewState === 'expanded' ? '92vh' : 'auto' }}
+            {/* Slide-Up Player Modal (CSS Transition) */}
+            <div
+                className={`lyriq-controls-modal ${viewState === 'expanded' ? 'visible' : viewState === 'peeking' ? 'peeking' : 'hidden'}`}
+                onClick={() => {
+                    if (viewState === 'peeking') onViewStateChange('expanded');
+                }}
             >
                 {/* Handle Bar */}
-                <div className="w-full flex justify-center pt-3 pb-1 cursor-grab active:cursor-grabbing" onClick={() => viewState === 'peeking' && onViewStateChange('expanded')}>
+                <div
+                    className="w-full flex justify-center pt-3 pb-1 cursor-grab active:cursor-grabbing"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (viewState === 'expanded') onViewStateChange('peeking');
+                        else if (viewState === 'peeking') onViewStateChange('expanded');
+                    }}
+                >
                     <div className="w-12 h-1.5 bg-zinc-700 rounded-full" />
                 </div>
 
                 {/* Player Content (Peek/Collapsed State) */}
                 {viewState !== 'expanded' && (
-                    <div className="px-6 py-4 pb-6">
-                        {!hasBeatOrRecording ? (
-                            /* Initial State: Add Beat / Record Buttons */
-                            <div className="flex items-center justify-around gap-4 pt-2">
-                                <button
-                                    onClick={() => fileInputRef.current?.click()}
-                                    className="flex items-center gap-2 text-white font-medium px-6 py-3 rounded-full bg-pink-600 hover:bg-pink-700 transition-all shadow-md shadow-pink-900"
-                                >
-                                    <Music size={20} />
-                                    Add Beat
-                                </button>
-                                <div className="w-px h-8 bg-zinc-700" />
-                                <button
-                                    onClick={() => setIsRecording(true)}
-                                    className="flex items-center gap-2 text-white font-medium px-6 py-3 rounded-full bg-zinc-800 hover:bg-zinc-700 transition-colors shadow-md shadow-zinc-800"
-                                >
-                                    <Mic size={20} />
-                                    Record Flow
-                                </button>
-                            </div>
-                        ) : (
-                            /* Playing/Peek State (Transport Controls) */
-                            <div className="flex flex-col gap-2">
-                                {/* Progress Bar */}
-                                <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden mb-2 relative">
-                                    <motion.div
-                                        className="h-full bg-pink-500 shadow-lg shadow-pink-500/50"
-                                        style={{ width: `${progressPercent}%` }}
-                                        transition={{ duration: 0.1 }}
-                                    />
-                                    <div className="absolute top-1/2 -translate-y-1/2 h-4 w-4 rounded-full bg-white ring-2 ring-pink-500" style={{ left: `${progressPercent}%`, marginLeft: '-8px' }} />
-                                </div>
-
-                                <div className="flex items-center justify-between">
-                                    <div className="flex flex-col">
-                                        <h2 className="text-white font-bold text-base">{songTitle}</h2>
-                                        <span className="text-zinc-500 text-xs font-mono">
-                                            {formatTime(currentTime)} / {formatTime(duration)}
-                                        </span>
-                                    </div>
-
-                                    <div className="flex items-center gap-6">
-                                        <button onClick={handleRewind} className="text-white/70 hover:text-white transition-colors p-1">
-                                            <Rewind size={24} fill="currentColor" />
-                                        </button>
-                                        <button onClick={togglePlayback} className="text-white bg-pink-600 p-2 rounded-full hover:bg-pink-500 transition-colors shadow-xl shadow-pink-900">
-                                            {isPlaying ? <Pause size={28} fill="currentColor" /> : <Play size={28} fill="currentColor" />}
-                                        </button>
-                                        <button onClick={handleForward} className="text-white/70 hover:text-white transition-colors p-1">
-                                            <FastForward size={24} fill="currentColor" />
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
+                    <div className="lyriq-initial-controls">
+                        <button
+                            onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                            className="lyriq-initial-btn"
+                        >
+                            <Music size={20} />
+                            Add Beat
+                        </button>
+                        <div className="lyriq-initial-separator" />
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setIsRecording(true); }}
+                            className="lyriq-initial-btn"
+                        >
+                            <Mic size={20} />
+                            Record
+                        </button>
                     </div>
                 )}
 
@@ -381,10 +611,10 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                 {/* Expanded Content (Minimalist Player) */}
                 {viewState === 'expanded' && (
                     <motion.div
-                        className="flex-grow flex flex-col px-6 pt-0 items-center justify-start"
+                        className="flex-grow flex flex-col px-6 pt-0 items-center justify-start h-full"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        transition={{ duration: 0.3 }}
+                        transition={{ duration: 0.3, delay: 0.2 }} // Delay to let slide finish
                     >
                         {/* Time Display (Centered) */}
                         <div className="text-zinc-400 font-mono text-lg mb-4 mt-6">
@@ -401,29 +631,108 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                                 <Mic size={20} className={isRecording ? "text-red-500" : "text-zinc-500"} title="Vocal Track" />
                             </div>
 
-                            {/* Waveform Container */}
-                            <div className="ml-10 h-24 bg-zinc-800/50 rounded-lg relative overflow-hidden flex items-center justify-center p-2">
-                                {/* Placeholder Waveform */}
-                                <div className="absolute inset-0 flex items-center justify-center gap-0.5 opacity-50">
-                                    {Array.from({ length: 100 }).map((_, i) => (
-                                        <div
-                                            key={i}
-                                            className="w-0.5 bg-pink-500/80 rounded-full transition-all duration-100"
-                                            style={{ height: `${Math.max(5, Math.random() * 90)}%`, opacity: Math.random() * 0.5 + 0.5 }}
+                            {/* Waveform Container - Dual Track Stack */}
+                            <div
+                                ref={waveformContainerRef}
+                                className="ml-10 h-24 bg-zinc-800/50 rounded-lg relative overflow-hidden cursor-pointer"
+                                onMouseDown={handleScrubStart}
+                                onTouchStart={handleScrubStart}
+                            >
+                                {/* Beat Track Waveform (Bottom Layer) */}
+                                <div className="absolute inset-0 flex items-end p-2 pointer-events-none">
+                                    {beatAudioBuffer ? (
+                                        <canvas
+                                            ref={beatWaveformCanvasRef}
+                                            className="w-full h-1/2"
                                         />
-                                    ))}
+                                    ) : (
+                                        <div className="w-full h-1/2 flex items-center justify-center gap-0.5 opacity-30">
+                                            {Array.from({ length: 100 }).map((_, i) => (
+                                                <div
+                                                    key={i}
+                                                    className="w-0.5 bg-zinc-600 rounded-full"
+                                                    style={{ height: `${Math.max(5, Math.random() * 60)}%` }}
+                                                />
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
-                                {/* Indicator line for current position (Playhead) */}
-                                <div className="absolute top-0 bottom-0 w-0.5 bg-red-400 shadow-xl shadow-red-500/50" style={{ left: `${progressPercent}%` }} />
+
+                                {/* Vocal Track Waveform (Top Layer) */}
+                                {vocalAudioBuffer && (
+                                    <div className="absolute inset-0 flex items-start p-2">
+                                        <canvas
+                                            ref={vocalWaveformCanvasRef}
+                                            className="w-full h-1/2"
+                                        />
+                                    </div>
+                                )}
                             </div>
+
+                            {/* Volume Mixer Overlay */}
+                            {showVolumeMixer && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -10 }}
+                                    className="absolute top-0 left-0 right-0 ml-10 h-24 bg-zinc-900/95 backdrop-blur-sm rounded-lg border border-pink-500/20 p-4 flex flex-col justify-center gap-3 z-10"
+                                >
+                                    {/* Beat Volume Slider */}
+                                    <div className="flex items-center gap-3">
+                                        <Music size={16} className="text-pink-500 flex-shrink-0" />
+                                        <div className="flex-grow relative h-2 bg-zinc-700 rounded-full overflow-hidden">
+                                            <div
+                                                className="absolute inset-y-0 left-0 bg-pink-500 rounded-full"
+                                                style={{ width: `${beatVolume * 100}%` }}
+                                            />
+                                            <input
+                                                type="range"
+                                                min="0"
+                                                max="100"
+                                                value={beatVolume * 100}
+                                                onChange={(e) => setBeatVolume(Number(e.target.value) / 100)}
+                                                className="absolute inset-0 w-full opacity-0 cursor-pointer"
+                                            />
+                                        </div>
+                                        <span className="text-xs text-zinc-400 w-10 text-right tabular-nums">
+                                            {Math.round(beatVolume * 100)}%
+                                        </span>
+                                    </div>
+
+                                    {/* Vocal Volume Slider */}
+                                    {vocalUrl && (
+                                        <div className="flex items-center gap-3">
+                                            <Mic size={16} className="text-red-500 flex-shrink-0" />
+                                            <div className="flex-grow relative h-2 bg-zinc-700 rounded-full overflow-hidden">
+                                                <div
+                                                    className="absolute inset-y-0 left-0 bg-red-500 rounded-full"
+                                                    style={{ width: `${vocalVolume * 100}%` }}
+                                                />
+                                                <input
+                                                    type="range"
+                                                    min="0"
+                                                    max="100"
+                                                    value={vocalVolume * 100}
+                                                    onChange={(e) => setVocalVolume(Number(e.target.value) / 100)}
+                                                    className="absolute inset-0 w-full opacity-0 cursor-pointer"
+                                                />
+                                            </div>
+                                            <span className="text-xs text-zinc-400 w-10 text-right tabular-nums">
+                                                {Math.round(vocalVolume * 100)}%
+                                            </span>
+                                        </div>
+                                    )}
+                                </motion.div>
+                            )}
                         </div>
 
                         {/* Floating Action Buttons (Centered below waveform) */}
-                        <div className="flex items-center justify-center gap-8 mt-12">
+                        <div className="flex items-center justify-center gap-8 mt-6">
 
                             {/* Volume Button */}
                             <button
-                                className="p-2.5 text-zinc-400 hover:text-white transition-colors rounded-full w-11 h-11 flex items-center justify-center"
+                                onClick={() => setShowVolumeMixer(!showVolumeMixer)}
+                                className={`p-2.5 transition-colors rounded-full w-11 h-11 flex items-center justify-center ${showVolumeMixer ? 'text-pink-500 bg-pink-500/10' : 'text-zinc-400 hover:text-white'}`}
                                 title="Toggle Volume Mixer"
                             >
                                 <Volume2 size={24} />
@@ -432,7 +741,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                             {/* Record Button */}
                             <button
                                 className={`py-2.5 px-4 rounded-full transition-all duration-300 ${isRecording ? 'bg-red-600 text-white animate-pulse shadow-2xl shadow-red-900' : 'bg-red-600 hover:bg-red-700 shadow-lg shadow-red-900'}`}
-                                onClick={() => setIsRecording(!isRecording)}
+                                onClick={toggleRecording}
                                 title={isRecording ? "Stop Recording" : "Start Recording"}
                             >
                                 <div className={`w-8 h-8 rounded-full ${isRecording ? 'bg-white' : 'bg-red-500/0'}`} />
@@ -449,13 +758,14 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                         </div>
 
                         {/* Vertical Spacer */}
-                        <div className="flex-grow w-full h-8" />
+                        <div className="flex-grow w-full h-4" />
                     </motion.div>
                 )}
-            </motion.div>
+            </div>
 
             {/* Hidden Audio Elements */}
             <audio ref={beatPlayerRef} src={beatUrl} crossOrigin="anonymous" onLoadedMetadata={() => setDuration(beatPlayerRef.current?.duration || 0)} />
+            <audio ref={vocalPlayerRef} src={vocalUrl || undefined} crossOrigin="anonymous" />
             <input
                 type="file"
                 ref={fileInputRef}

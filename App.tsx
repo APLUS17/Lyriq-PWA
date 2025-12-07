@@ -73,14 +73,14 @@ const getAudioDuration = (blob: Blob): Promise<number> => {
 
 const App: React.FC = () => {
     // Navigation state
-    const [currentScreen, setCurrentScreen] = useState<'home' | 'editor' | 'flow'>('home');
+    const [currentScreen, setCurrentScreen] = useState<'home' | 'editor' | 'flow'>('flow');
     const [activeProjectTitle, setActiveProjectTitle] = useState('');
     const [direction, setDirection] = useState(0); // 1 = forward, -1 = back
     const [projects, setProjects] = useState<any[]>([]);
 
     const [song, setSong] = useState<Song>(initialSong);
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [flowScreenState, setFlowScreenState] = useState<'hidden' | 'peeking' | 'expanded'>('hidden');
+    const [flowScreenState, setFlowScreenState] = useState<'hidden' | 'peeking' | 'expanded'>('peeking');
     const [isUnstructured, setIsUnstructured] = useState(true);
     const [showSyllableCount, setShowSyllableCount] = useState(false);
     const sectionEditorRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
@@ -1067,8 +1067,8 @@ const App: React.FC = () => {
                         className="fixed inset-0 z-50 bg-black"
                     >
                         <FlowScreen
-                            viewState="expanded" // Always expanded as a page, or manage internal state
-                            onViewStateChange={() => { }} // Internal management or back nav
+                            viewState={flowScreenState}
+                            onViewStateChange={setFlowScreenState}
                             songTitle={activeProjectTitle || "Untitled Song"}
                             lyrics={song.sections.flatMap(s => s.lyrics)}
                             beatUrl={beat?.url}

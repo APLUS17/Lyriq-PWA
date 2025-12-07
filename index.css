@@ -141,3 +141,90 @@ html {
   color: #ec4899;
   /* pink-500 to match theme */
 }
+
+/* Lyriq Controls Modal Animation & Styling */
+:root {
+  --duration-normal: 0.5s;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --lyriq-modal-peeking-height: 96px;
+  --lyriq-modal-expanded-height: 60vh;
+  /* Using 60vh based on previous task, adjust if needed */
+}
+
+.lyriq-controls-modal {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background-color: #18181b;
+  /* zinc-900 */
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.8);
+
+  /* Start hidden (pushed down) */
+  transform: translateY(100%);
+
+  /* The Animation Engine */
+  transition: transform var(--duration-normal) var(--ease-out-expo), height var(--duration-normal) var(--ease-out-expo);
+}
+
+/* State 1: Peeking (Mini Player) */
+.lyriq-controls-modal.peeking {
+  transform: translateY(0);
+  height: var(--lyriq-modal-peeking-height);
+}
+
+/* State 2: Visible (Expanded Player) */
+.lyriq-controls-modal.visible {
+  transform: translateY(0);
+  height: var(--lyriq-modal-expanded-height);
+}
+
+.lyriq-controls-modal.hidden {
+  transform: translateY(100%);
+}
+
+/* Initial Controls (Add Beat | Record) */
+.lyriq-initial-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 24px;
+  gap: 16px;
+  height: 100%;
+  /* Fill the peeking container */
+}
+
+.lyriq-initial-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-size: 16px;
+  font-weight: 500;
+  color: white;
+  background-color: rgba(255, 255, 255, 0.05);
+  /* Subtle background */
+  border-radius: 12px;
+  transition: background-color 0.2s;
+}
+
+.lyriq-initial-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.lyriq-initial-separator {
+  width: 1px;
+  height: 24px;
+  background-color: rgba(255, 255, 255, 0.1);
+}
