@@ -240,13 +240,23 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
         };
 
         resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
 
-        // Render vocal waveform (static for now, will update with progress)
-        const progress = duration > 0 ? currentTime / duration : 0;
-        drawCenteredWaveform(ctx, vocalAudioBuffer, progress);
+        // Animation loop for vocal waveform
+        let vocalAnimationRef: number | null = null;
+        const renderVocalWaveform = () => {
+            const progress = duration > 0 ? currentTime / duration : 0;
+            drawCenteredWaveform(ctx, vocalAudioBuffer, progress);
+            vocalAnimationRef = requestAnimationFrame(renderVocalWaveform);
+        };
+
+        renderVocalWaveform();
 
         return () => {
-            // Cleanup
+            window.removeEventListener('resize', resizeCanvas);
+            if (vocalAnimationRef) {
+                cancelAnimationFrame(vocalAnimationRef);
+            }
         };
     }, [vocalAudioBuffer, currentTime, duration]);
 
@@ -414,13 +424,35 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                     const url = URL.createObjectURL(audioBlob);
                     setVocalUrl(url);
 
+                    // Wait a bit for the audio element to update before decoding
+                    await new Promise(resolve => setTimeout(resolve, 100));
+
                     // Decode for waveform
                     const ctx = initAudioContext();
                     try {
                         const buffer = await decodeAudioFromUrl(url, ctx);
                         setVocalAudioBuffer(buffer);
+                        console.log('Vocal recording decoded successfully', buffer);
                     } catch (err) {
                         console.error('Failed to decode vocal recording:', err);
+                    }
+
+                    // Connect vocal player to AudioContext if not already connected
+                    if (vocalPlayerRef.current && !vocalSourceNodeRef.current) {
+                        try {
+                            // Wait for audio element to load
+                            await new Promise((resolve) => {
+                                if (vocalPlayerRef.current) {
+                                    vocalPlayerRef.current.onloadedmetadata = resolve;
+                                }
+                            });
+
+                            vocalSourceNodeRef.current = ctx.createMediaElementSource(vocalPlayerRef.current);
+                            vocalSourceNodeRef.current.connect(ctx.destination);
+                            console.log('Vocal player connected to AudioContext');
+                        } catch (e) {
+                            console.warn("Could not connect vocal source:", e);
+                        }
                     }
 
                     // Stop all tracks in the stream
@@ -658,7 +690,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                             <div className="absolute top-1/2 -translate-y-1/2 left-0 -ml-1 flex flex-col items-center justify-around h-20 text-zinc-500">
                                 <Music size={20} className={beatUrl ? "text-pink-500" : "text-zinc-500"} title="Beat Track" />
                                 <div className="h-4"></div> {/* Small spacer */}
-                                <Mic size={20} className={isRecording ? "text-red-500" : "text-zinc-500"} title="Vocal Track" />
+                                <Mic size={20} className={isRecording ? "text-red-500 animate-pulse" : vocalUrl ? "text-green-500" : "text-zinc-500"} title={isRecording ? "Recording..." : vocalUrl ? "Vocal Track Loaded" : "No Vocal Track"} />
                             </div>
 
                             {/* Waveform Container - Dual Track Stack */}
@@ -795,7 +827,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
 
             {/* Hidden Audio Elements */}
             <audio ref={beatPlayerRef} src={beatUrl} crossOrigin="anonymous" onLoadedMetadata={() => setDuration(beatPlayerRef.current?.duration || 0)} />
-            <audio ref={vocalPlayerRef} src={vocalUrl || undefined} crossOrigin="anonymous" />
+            <audio ref={vocalPlayerRef} src={vocalUrl || undefined} />
             <input
                 type="file"
                 ref={fileInputRef}
