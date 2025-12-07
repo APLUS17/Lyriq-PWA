@@ -587,24 +587,54 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                 </div>
 
                 {/* Player Content (Peek/Collapsed State) */}
+                {/* Player Content (Peek/Collapsed State) */}
                 {viewState !== 'expanded' && (
-                    <div className="lyriq-initial-controls">
-                        <button
-                            onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                            className="lyriq-initial-btn"
-                        >
-                            <Music size={20} />
-                            Add Beat
-                        </button>
-                        <div className="lyriq-initial-separator" />
-                        <button
-                            onClick={(e) => { e.stopPropagation(); setIsRecording(true); }}
-                            className="lyriq-initial-btn"
-                        >
-                            <Mic size={20} />
-                            Record
-                        </button>
-                    </div>
+                    (beatUrl || vocalUrl || isRecording) ? (
+                        <div className="lyriq-mini-player">
+                            <div className="flex flex-col items-start justify-center h-full gap-1">
+                                <span className="text-white font-bold text-sm tracking-tight">{songTitle || "Untitled Project"}</span>
+                                <span className="text-zinc-500 font-mono text-xs tracking-wider">{formatTime(currentTime)} / {formatTime(duration)}</span>
+                            </div>
+                            <div className="flex items-center gap-6">
+                                <button
+                                    onClick={handleRewind}
+                                    className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                                >
+                                    <Rewind size={24} fill="currentColor" className="opacity-80" />
+                                </button>
+                                <button
+                                    onClick={togglePlayback}
+                                    className="text-zinc-400 hover:text-white transition-colors"
+                                >
+                                    {isPlaying ? <Pause size={28} fill="currentColor" /> : <Play size={28} fill="currentColor" />}
+                                </button>
+                                <button
+                                    onClick={handleForward}
+                                    className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                                >
+                                    <FastForward size={24} fill="currentColor" className="opacity-80" />
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="lyriq-initial-controls">
+                            <button
+                                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                                className="lyriq-initial-btn"
+                            >
+                                <Music size={20} />
+                                Add Beat
+                            </button>
+                            <div className="lyriq-initial-separator" />
+                            <button
+                                onClick={(e) => { e.stopPropagation(); toggleRecording(); }}
+                                className="lyriq-initial-btn"
+                            >
+                                <Mic size={20} />
+                                Record
+                            </button>
+                        </div>
+                    )
                 )}
 
 
