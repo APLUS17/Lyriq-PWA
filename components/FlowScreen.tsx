@@ -9,6 +9,9 @@ import { getTimeFromEvent } from '../services/scrubbingService';
 
 export type FlowScreenState = 'hidden' | 'peeking' | 'expanded';
 
+// Timeline rendering constant - pixels per second for waveform width
+const PIXELS_PER_SECOND = 100;
+
 interface FlowScreenProps {
     viewState: FlowScreenState;
     onViewStateChange: (state: FlowScreenState) => void;
@@ -183,22 +186,16 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // Set canvas size based on container
-        const resizeCanvas = () => {
-            const container = canvas.parentElement;
-            if (container) {
-                const dpr = window.devicePixelRatio || 1;
-                const rect = container.getBoundingClientRect();
-                canvas.width = rect.width * dpr;
-                canvas.height = rect.height * dpr;
-                ctx.scale(dpr, dpr);
-                canvas.style.width = `${rect.width}px`;
-                canvas.style.height = `${rect.height}px`;
-            }
-        };
+        // Calculate canvas width based on audio duration for scrolling timeline
+        const canvasWidth = beatAudioBuffer.duration * PIXELS_PER_SECOND;
+        const dpr = window.devicePixelRatio || 1;
 
-        resizeCanvas();
-        window.addEventListener('resize', resizeCanvas);
+        // Set canvas size - width based on duration, height fixed
+        canvas.width = canvasWidth * dpr;
+        canvas.height = 50 * dpr; // Half of container height
+        ctx.scale(dpr, dpr);
+        canvas.style.width = `${canvasWidth}px`;
+        canvas.style.height = '50%';
 
         // Animation loop
         const renderWaveform = () => {
@@ -210,7 +207,6 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
         renderWaveform();
 
         return () => {
-            window.removeEventListener('resize', resizeCanvas);
             if (waveformAnimationRef.current) {
                 cancelAnimationFrame(waveformAnimationRef.current);
             }
@@ -225,28 +221,32 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // Set canvas size
-        const resizeCanvas = () => {
-            const container = canvas.parentElement;
-            if (container) {
-                const dpr = window.devicePixelRatio || 1;
-                const rect = container.getBoundingClientRect();
-                canvas.width = rect.width * dpr;
-                canvas.height = rect.height * dpr;
-                ctx.scale(dpr, dpr);
-                canvas.style.width = `${rect.width}px`;
-                canvas.style.height = `${rect.height}px`;
-            }
+        // Calculate canvas width - match beat duration or use vocal duration if longer
+        const maxDuration = Math.max(vocalAudioBuffer.duration, duration);
+        const canvasWidth = maxDuration * PIXELS_PER_SECOND;
+        const dpr = window.devicePixelRatio || 1;
+
+        // Set canvas size - width based on duration, height fixed
+        canvas.width = canvasWidth * dpr;
+        canvas.height = 50 * dpr; // Half of container height
+        ctx.scale(dpr, dpr);
+        canvas.style.width = `${canvasWidth}px`;
+        canvas.style.height = '50%';
+
+        // Animation loop for vocal waveform
+        let vocalAnimationRef: number | null = null;
+        const renderVocalWaveform = () => {
+            const progress = maxDuration > 0 ? currentTime / maxDuration : 0;
+            drawCenteredWaveform(ctx, vocalAudioBuffer, progress);
+            vocalAnimationRef = requestAnimationFrame(renderVocalWaveform);
         };
 
-        resizeCanvas();
-
-        // Render vocal waveform (static for now, will update with progress)
-        const progress = duration > 0 ? currentTime / duration : 0;
-        drawCenteredWaveform(ctx, vocalAudioBuffer, progress);
+        renderVocalWaveform();
 
         return () => {
-            // Cleanup
+            if (vocalAnimationRef) {
+                cancelAnimationFrame(vocalAnimationRef);
+            }
         };
     }, [vocalAudioBuffer, currentTime, duration]);
 
@@ -414,13 +414,35 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                     const url = URL.createObjectURL(audioBlob);
                     setVocalUrl(url);
 
+                    // Wait a bit for the audio element to update before decoding
+                    await new Promise(resolve => setTimeout(resolve, 100));
+
                     // Decode for waveform
                     const ctx = initAudioContext();
                     try {
                         const buffer = await decodeAudioFromUrl(url, ctx);
                         setVocalAudioBuffer(buffer);
+                        console.log('Vocal recording decoded successfully', buffer);
                     } catch (err) {
                         console.error('Failed to decode vocal recording:', err);
+                    }
+
+                    // Connect vocal player to AudioContext if not already connected
+                    if (vocalPlayerRef.current && !vocalSourceNodeRef.current) {
+                        try {
+                            // Wait for audio element to load
+                            await new Promise((resolve) => {
+                                if (vocalPlayerRef.current) {
+                                    vocalPlayerRef.current.onloadedmetadata = resolve;
+                                }
+                            });
+
+                            vocalSourceNodeRef.current = ctx.createMediaElementSource(vocalPlayerRef.current);
+                            vocalSourceNodeRef.current.connect(ctx.destination);
+                            console.log('Vocal player connected to AudioContext');
+                        } catch (e) {
+                            console.warn("Could not connect vocal source:", e);
+                        }
                     }
 
                     // Stop all tracks in the stream
@@ -641,13 +663,13 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                 {/* Expanded Content (Minimalist Player) */}
                 {viewState === 'expanded' && (
                     <motion.div
-                        className="flex-grow flex flex-col px-6 pt-0 items-center justify-start h-full"
+                        className="flex flex-col px-6 pt-0 pb-6 items-center justify-start"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ duration: 0.3, delay: 0.2 }} // Delay to let slide finish
                     >
                         {/* Time Display (Centered) */}
-                        <div className="text-zinc-400 font-mono text-lg mb-4 mt-6">
+                        <div className="text-zinc-400 font-mono text-lg mb-3 mt-3">
                             {formatTime(currentTime)} / {formatTime(duration)}
                         </div>
 
@@ -658,44 +680,42 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                             <div className="absolute top-1/2 -translate-y-1/2 left-0 -ml-1 flex flex-col items-center justify-around h-20 text-zinc-500">
                                 <Music size={20} className={beatUrl ? "text-pink-500" : "text-zinc-500"} title="Beat Track" />
                                 <div className="h-4"></div> {/* Small spacer */}
-                                <Mic size={20} className={isRecording ? "text-red-500" : "text-zinc-500"} title="Vocal Track" />
+                                <Mic size={20} className={isRecording ? "text-red-500 animate-pulse" : vocalUrl ? "text-green-500" : "text-zinc-500"} title={isRecording ? "Recording..." : vocalUrl ? "Vocal Track Loaded" : "No Vocal Track"} />
                             </div>
 
-                            {/* Waveform Container - Dual Track Stack */}
+                            {/* Waveform Container - Scrollable Dual Track Stack */}
                             <div
                                 ref={waveformContainerRef}
-                                className="ml-10 h-24 bg-zinc-800/50 rounded-lg relative overflow-hidden cursor-pointer"
+                                className="ml-10 h-24 bg-zinc-800/50 rounded-lg relative overflow-x-scroll overflow-y-hidden cursor-pointer scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent"
                                 onMouseDown={handleScrubStart}
                                 onTouchStart={handleScrubStart}
                             >
-                                {/* Beat Track Waveform (Bottom Layer) */}
-                                <div className="absolute inset-0 flex items-end p-2 pointer-events-none">
-                                    {beatAudioBuffer ? (
-                                        <canvas
-                                            ref={beatWaveformCanvasRef}
-                                            className="w-full h-1/2"
-                                        />
-                                    ) : (
-                                        <div className="w-full h-1/2 flex items-center justify-center gap-0.5 opacity-30">
-                                            {Array.from({ length: 100 }).map((_, i) => (
-                                                <div
-                                                    key={i}
-                                                    className="w-0.5 bg-zinc-600 rounded-full"
-                                                    style={{ height: `${Math.max(5, Math.random() * 60)}%` }}
-                                                />
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Vocal Track Waveform (Top Layer) */}
-                                {vocalAudioBuffer && (
-                                    <div className="absolute inset-0 flex items-start p-2">
-                                        <canvas
-                                            ref={vocalWaveformCanvasRef}
-                                            className="w-full h-1/2"
-                                        />
+                                {/* Beat Track Waveform (Top 50%) */}
+                                {beatAudioBuffer ? (
+                                    <canvas
+                                        ref={beatWaveformCanvasRef}
+                                        className="absolute left-0 top-0 block"
+                                        style={{ height: '50%' }}
+                                    />
+                                ) : (
+                                    <div className="absolute left-0 top-0 w-full h-1/2 flex items-center justify-center gap-0.5 opacity-30 px-2">
+                                        {Array.from({ length: 100 }).map((_, i) => (
+                                            <div
+                                                key={i}
+                                                className="w-0.5 bg-zinc-600 rounded-full"
+                                                style={{ height: `${Math.max(5, Math.random() * 60)}%` }}
+                                            />
+                                        ))}
                                     </div>
+                                )}
+
+                                {/* Vocal Track Waveform (Bottom 50%) */}
+                                {vocalAudioBuffer && (
+                                    <canvas
+                                        ref={vocalWaveformCanvasRef}
+                                        className="absolute left-0 bottom-0 block"
+                                        style={{ height: '50%' }}
+                                    />
                                 )}
                             </div>
 
@@ -757,7 +777,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                         </div>
 
                         {/* Floating Action Buttons (Centered below waveform) */}
-                        <div className="flex items-center justify-center gap-8 mt-6">
+                        <div className="flex items-center justify-center gap-8 mt-4">
 
                             {/* Volume Button */}
                             <button
@@ -786,16 +806,13 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                                 {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
                             </button>
                         </div>
-
-                        {/* Vertical Spacer */}
-                        <div className="flex-grow w-full h-4" />
                     </motion.div>
                 )}
             </div>
 
             {/* Hidden Audio Elements */}
             <audio ref={beatPlayerRef} src={beatUrl} crossOrigin="anonymous" onLoadedMetadata={() => setDuration(beatPlayerRef.current?.duration || 0)} />
-            <audio ref={vocalPlayerRef} src={vocalUrl || undefined} crossOrigin="anonymous" />
+            <audio ref={vocalPlayerRef} src={vocalUrl || undefined} />
             <input
                 type="file"
                 ref={fileInputRef}
