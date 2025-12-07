@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import { Song, Section, Lyric, AudioTake } from './types';
 import { getSyllableCount, getSyllableCountsForWrappedLines } from './services/syllableService';
-import { UnderlineIcon, SyllableCountIcon, PlusIcon, TrashIcon, GeminiIcon, MicrophoneIcon, MusicNoteIcon } from './components/Icons';
+import { TrashIcon, GeminiIcon, MicrophoneIcon, MusicNoteIcon } from './components/Icons';
 import SectionModal from './components/SectionModal';
 import GeminiActionModal from './components/GeminiActionModal';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -9,9 +9,38 @@ import RhymePopup from './components/RhymePopup';
 import AudioRecorder from './components/AudioRecorder';
 import BottomTakesPlayer from './components/BottomTakesPlayer';
 import InitialControls from './components/InitialControls';
+import FlowScreen from './components/FlowScreen';
 import MasterPlayer from './components/MasterPlayer';
-import SplashScreen from './components/SplashScreen';
+import HomeScreen from './components/HomeScreen';
+import { AnimatePresence, motion } from 'framer-motion';
+import { ChevronLeft } from 'lucide-react';
 
+
+// Page animation variants
+const pageVariants = {
+    initial: (direction: number) => ({
+        x: direction > 0 ? 100 : -100,
+        opacity: 0,
+        scale: 0.95,
+        filter: "blur(10px)"
+    }),
+    animate: {
+        x: 0,
+        opacity: 1,
+        scale: 1,
+        filter: "blur(0px)",
+        transition: {
+            x: { type: "spring", stiffness: 300, damping: 30 },
+            opacity: { duration: 0.2 }
+        }
+    },
+    exit: (direction: number) => ({
+        x: direction < 0 ? 100 : -100,
+        opacity: 0,
+        scale: 0.95,
+        filter: "blur(10px)"
+    }),
+};
 
 const initialSectionId = crypto.randomUUID();
 const initialSong: Song = {
@@ -43,8 +72,15 @@ const getAudioDuration = (blob: Blob): Promise<number> => {
 };
 
 const App: React.FC = () => {
+    // Navigation state
+    const [currentScreen, setCurrentScreen] = useState<'home' | 'editor' | 'flow'>('home');
+    const [activeProjectTitle, setActiveProjectTitle] = useState('');
+    const [direction, setDirection] = useState(0); // 1 = forward, -1 = back
+    const [projects, setProjects] = useState<any[]>([]);
+
     const [song, setSong] = useState<Song>(initialSong);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [flowScreenState, setFlowScreenState] = useState<'hidden' | 'peeking' | 'expanded'>('peeking');
     const [isUnstructured, setIsUnstructured] = useState(true);
     const [showSyllableCount, setShowSyllableCount] = useState(false);
     const sectionEditorRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
@@ -95,6 +131,47 @@ const App: React.FC = () => {
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
     const streamRef = useRef<MediaStream | null>(null);
+
+    // Global Navigation Gesture State
+    const globalTouchStart = useRef<{ x: number, y: number } | null>(null);
+
+    const handleGlobalTouchStart = (e: React.TouchEvent) => {
+        globalTouchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    };
+
+    const handleGlobalTouchEnd = (e: React.TouchEvent) => {
+        if (!globalTouchStart.current) return;
+
+        const diffX = e.changedTouches[0].clientX - globalTouchStart.current.x;
+        const diffY = e.changedTouches[0].clientY - globalTouchStart.current.y;
+
+        // Horizontal swipe detection (ignore if vertical scroll is dominant)
+        if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 50) {
+            if (diffX < 0) {
+                // Swipe Left (Right-to-Left) -> Forward
+                if (currentScreen === 'home') {
+                    setDirection(1);
+                    setCurrentScreen('editor');
+                } else if (currentScreen === 'editor') {
+                    // Check for Right Edge Swipe -> Flow
+                    if (globalTouchStart.current.x > window.innerWidth * 0.8) {
+                        setDirection(1);
+                        setCurrentScreen('flow');
+                    }
+                }
+            } else {
+                // Swipe Right (Left-to-Right) -> Backward
+                if (currentScreen === 'editor') {
+                    setDirection(-1);
+                    setCurrentScreen('home');
+                } else if (currentScreen === 'flow') {
+                    setDirection(-1);
+                    setCurrentScreen('editor');
+                }
+            }
+        }
+        globalTouchStart.current = null;
+    };
 
     const [showSplash, setShowSplash] = useState(true);
 
@@ -304,7 +381,7 @@ const App: React.FC = () => {
 
         if (longPressTimeout.current) return;
 
-        const translateX = Math.min(0, diff);
+        const translateX = diff; // Allow both directions
         setDragState(prev => prev ? { ...prev, translateX } : null);
     }, [dragState, reorderState, song.sections]);
 
@@ -336,11 +413,32 @@ const App: React.FC = () => {
         const SWIPE_THRESHOLD = -window.innerWidth / 3.5;
 
         if (translateX < SWIPE_THRESHOLD) {
-            setDeletingSections(prev => new Set(prev).add(sectionId));
-            const timeoutId = setTimeout(() => {
-                deleteSection(sectionId);
-            }, 500);
-            deleteTimeouts.current.set(sectionId, timeoutId);
+            // Swipe Left
+            if (currentScreen === 'editor') {
+                // Check for Right Edge Swipe -> Go to Flow
+                const isRightEdgeSwipe = dragState.startX > window.innerWidth * 0.8;
+
+                if (isRightEdgeSwipe) {
+                    setDirection(1);
+                    setCurrentScreen('flow');
+                } else {
+                    // Normal Card Swipe -> Delete
+                    setDeletingSections(prev => new Set(prev).add(sectionId));
+                    const timeoutId = setTimeout(() => {
+                        deleteSection(sectionId);
+                    }, 500);
+                    deleteTimeouts.current.set(sectionId, timeoutId);
+                }
+            }
+        } else if (translateX > -SWIPE_THRESHOLD) {
+            // Swipe Right (Left-to-Right)
+            if (currentScreen === 'flow') {
+                setDirection(-1);
+                setCurrentScreen('editor');
+            } else if (currentScreen === 'editor') {
+                setDirection(-1);
+                setCurrentScreen('home');
+            }
         }
 
         setDragState(null);
@@ -647,253 +745,342 @@ const App: React.FC = () => {
     const anchorEl = geminiModalSectionId ? geminiIconRefs.current[geminiModalSectionId] : null;
     const activePlayerSection = song.sections.find(s => s.id === activePlayerSectionId);
 
+    // Navigation handler
+    const handleNavigate = (screen: string, title?: string) => {
+        if (screen === 'editor') {
+            setDirection(1); // Forward
+            if (title) setActiveProjectTitle(title);
+            setCurrentScreen('editor');
+        } else if (screen === 'home') {
+            setDirection(-1); // Back
+            setCurrentScreen('home');
+        }
+    };
+
+    const handleSaveProject = () => {
+        handleNavigate('home');
+    };
+
     return (
-        <div className={`h-[100dvh] flex flex-col lyriq-player-view ${isInitialState ? 'empty-state' : ''}`}>
-            {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
+        <div className="bg-black w-full min-h-screen overflow-hidden">
+            <AnimatePresence mode="wait">
+                {currentScreen === 'home' ? (
+                    <motion.div
+                        key="home"
+                        custom={direction}
+                        variants={pageVariants}
+                        initial="initial"
+                        animate="animate"
+                        exit="exit"
+                        onTouchStart={handleGlobalTouchStart}
+                        onTouchEnd={handleGlobalTouchEnd}
+                        className="h-full"
+                    >
+                        <HomeScreen onNavigate={handleNavigate} projects={projects} />
+                    </motion.div>
+                ) : (
+                    <motion.div
+                        key="editor"
+                        custom={direction}
+                        variants={pageVariants}
+                        initial="initial"
+                        animate="animate"
+                        exit="exit"
+                        className={`h-[100dvh] flex flex-col lyriq-player-view ${isInitialState ? 'empty-state' : ''}`}
+                        onTouchStart={handleGlobalTouchStart}
+                        onTouchEnd={handleGlobalTouchEnd}
+                    >
+                        <main className="flex-grow py-8 max-w-screen-xl mx-auto px-4 w-full h-full relative">
+                            {/* Glass Container for the Notepad */}
+                            <div className="h-full flex flex-col overflow-hidden relative">
 
-            <main className="flex-grow py-8 max-w-screen-xl mx-auto px-4 w-full h-full relative">
-                {/* Glass Container for the Notepad */}
-                <div className="h-full flex flex-col overflow-hidden relative">
-
-                    {/* Header / Toolbar */}
-                    <div className="relative flex items-center justify-between px-6 py-5 flex-shrink-0 z-10">
-                        <h2 className="text-3xl font-brand font-bold text-transparent bg-clip-text bg-gradient-to-br from-white via-gray-200 to-gray-400 tracking-tight">Lyriq</h2>
-                        <div className="flex items-center space-x-2">
-                            <button
-                                type="button"
-                                onClick={() => setIsUnstructured(prev => !prev)}
-                                aria-label="Toggle unstructured view"
-                                className="p-2 rounded-lg hover:bg-white/5 transition-colors"
-                            >
-                                <UnderlineIcon active={isUnstructured} />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setShowSyllableCount(prev => !prev)}
-                                aria-label="Toggle syllable count"
-                                className="p-2 rounded-lg hover:bg-white/5 transition-colors"
-                            >
-                                <SyllableCountIcon active={showSyllableCount} />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setIsModalOpen(true)}
-                                aria-label="Add section"
-                                className="p-2 rounded-lg hover:bg-white/5 transition-colors text-gray-400 hover:text-white"
-                            >
-                                <PlusIcon />
-                            </button>
-                        </div>
-                        <SectionModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onAddSection={addSection} />
-                    </div>
-
-                    <div className="flex-grow overflow-y-auto custom-scrollbar" onScroll={clearRhymePopupAndTimeout}>
-                        <div className="pt-6 px-4 md:px-8 pb-32">
-                            {song.sections.map((section, index) => {
-                                const isDeleting = deletingSections.has(section.id);
-                                const currentTranslateX = (dragState?.sectionId === section.id) ? dragState.translateX : 0;
-
-                                const isBeingDragged = reorderState?.sectionId === section.id;
-                                let containerStyle = {};
-                                let containerClasses = `transition-transform duration-300 ease-in-out`;
-
-                                if (reorderState) {
-                                    const { startIndex, currentY, initialY, draggedElHeight } = reorderState;
-                                    const finalDropIndex = dropIndex ?? startIndex;
-
-                                    if (isBeingDragged) {
-                                        containerStyle = {
-                                            transform: `translateY(${currentY - initialY}px)`,
-                                            zIndex: 50,
-                                            cursor: 'grabbing',
-                                        };
-                                        containerClasses = '';
-                                    } else {
-                                        let shiftAmount = 0;
-                                        if (startIndex < finalDropIndex && index > startIndex && index <= finalDropIndex) {
-                                            shiftAmount = -draggedElHeight - (isUnstructured ? 24 : 32);
-                                        } else if (startIndex > finalDropIndex && index < startIndex && index >= finalDropIndex) {
-                                            shiftAmount = draggedElHeight + (isUnstructured ? 24 : 32);
-                                        }
-                                        if (shiftAmount !== 0) {
-                                            containerStyle = { transform: `translateY(${shiftAmount}px)` };
-                                        }
-                                    }
-                                }
-
-                                return (
-                                    <div key={section.id}>
-                                        <div
-                                            className={`transition-all duration-500 ease-in-out ${isUnstructured ? 'mb-0' : 'mb-8'} ${isDeleting ? 'max-h-0 opacity-0 !mb-0' : 'max-h-[600px]'}`}
+                                {/* Header / Toolbar */}
+                                <div className="relative px-6 py-5 flex-shrink-0 z-10">
+                                    {/* Top row: Back button + Controls on right */}
+                                    <div className="flex items-center justify-between mb-6">
+                                        <button
+                                            onClick={() => handleNavigate('home')}
+                                            className="bg-zinc-800/40 backdrop-blur-md border border-white/10 text-gray-400 hover:text-white transition-colors p-2 rounded-full hover:bg-white/5"
+                                            aria-label="Go back to projects"
                                         >
-                                            <div
-                                                ref={el => { sectionContainerRefs.current[section.id] = el; }}
-                                                className={`relative ${containerClasses}`}
-                                                style={containerStyle}
-                                                onMouseDown={(e) => handleGestureStart(e, section.id)}
-                                                onTouchStart={(e) => handleGestureStart(e, section.id)}
+                                            <ChevronLeft size={20} />
+                                        </button>
+
+                                        <div className="flex items-center bg-zinc-800/40 backdrop-blur-md border border-white/10 rounded-full p-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsUnstructured(prev => !prev)}
+                                                aria-label="Toggle unstructured view"
+                                                className={`p-2 rounded-full hover:bg-white/10 transition-colors ${isUnstructured ? 'text-white bg-white/10' : 'text-gray-400'}`}
                                             >
-                                                <div className={`absolute inset-0 rounded-xl flex justify-end items-center pr-8 pointer-events-none ${!isUnstructured ? 'bg-red-900/50' : ''}`}>
-                                                    {!isUnstructured && <TrashIcon />}
-                                                </div>
-
-                                                <div
-                                                    style={{ transform: `translateX(${currentTranslateX}px)` }}
-                                                    className={`relative transition-all duration-500 ease-in-out will-change-[padding,background-color,border,box-shadow] ${dragState?.sectionId === section.id && dragState?.isDragging ? '!duration-0' : ''}
-                                                    ${isUnstructured
-                                                            ? 'bg-transparent border-l-2 border-transparent pl-4 hover:border-white/10 mb-6'
-                                                            : 'bg-[#18181b] border border-white/5 rounded-xl p-6 shadow-lg hover:border-white/10 hover:shadow-xl'
-                                                        }
-                                                    ${isBeingDragged ? 'shadow-2xl scale-[1.02] z-50 bg-zinc-800' : ''}
-                                                    ${activeSectionId === section.id && !isUnstructured ? 'ring-1 ring-white/10 bg-[#1c1c1f]' : ''}
-                                                    `}
-                                                >
-                                                    <div className="flex items-center justify-between mb-4">
-                                                        <div className="flex items-center gap-3 group">
-                                                            <h3
-                                                                contentEditable
-                                                                suppressContentEditableWarning
-                                                                dir="ltr"
-                                                                spellCheck={false}
-                                                                onInput={(e) => updateSectionTitle(section.id, e.currentTarget.innerText)}
-                                                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLHeadingElement).blur(); } }}
-                                                                onPaste={handleTitlePaste}
-                                                                className={`w-fit font-bold tracking-wide text-xs uppercase outline-none rounded-sm px-1 -ml-1 transition-colors
-                                                                    ${isUnstructured ? 'text-gray-500 focus:text-gray-300' : 'text-gray-400 bg-white/5 py-0.5 px-2'}`}
-                                                            >{section.title}</h3>
-                                                            <button
-                                                                ref={el => { geminiIconRefs.current[section.id] = el; }}
-                                                                type="button"
-                                                                aria-label="Gemini Actions"
-                                                                onClick={(e) => handleGeminiIconClick(e, section.id)}
-                                                                className={`transition-all duration-300 ease-in-out text-blue-400 hover:text-blue-300 ${activeSectionId === section.id ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}
-                                                                tabIndex={activeSectionId === section.id ? 0 : -1}
-                                                            >
-                                                                <GeminiIcon className="h-4 w-4" />
-                                                            </button>
-                                                        </div>
-                                                        {!isUnstructured && (
-                                                            <div className="flex items-center space-x-1">
-                                                                {section.takes.length > 0 && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => setActivePlayerSectionId(section.id)}
-                                                                        className="bg-zinc-800/80 border border-white/5 rounded-full flex items-center space-x-1.5 px-3 py-1 text-xs font-medium text-gray-300 hover:bg-zinc-700 hover:text-white transition-all"
-                                                                        aria-label={`Show ${section.takes.length} audio takes`}
-                                                                    >
-                                                                        <MusicNoteIcon />
-                                                                        <span>{section.takes.length}</span>
-                                                                    </button>
-                                                                )}
-                                                                <button
-                                                                    type="button"
-                                                                    aria-label="Record audio"
-                                                                    onClick={() => handleRecordClick(section.id)}
-                                                                    className="p-2 text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded-full transition-all"
-                                                                >
-                                                                    <MicrophoneIcon />
-                                                                </button>
-                                                            </div>
-                                                        )}
-                                                    </div>
-
-                                                    <div className="flex items-start">
-                                                        <div
-                                                            ref={el => { sectionEditorRefs.current[section.id] = el; }}
-                                                            contentEditable
-                                                            data-placeholder="Start writing..."
-                                                            data-section-id={section.id}
-                                                            onFocus={() => { clearRhymePopupAndTimeout(); setActiveSectionId(section.id); }}
-                                                            onBlur={clearRhymePopupAndTimeout}
-                                                            onMouseDown={clearRhymePopupAndTimeout}
-                                                            onTouchStart={clearRhymePopupAndTimeout}
-                                                            onMouseUp={handleSelection}
-                                                            onTouchEnd={handleSelection}
-                                                            onInput={e => handleLyricsInput(section.id, e.currentTarget as HTMLDivElement)}
-                                                            onPaste={handlePaste}
-                                                            className="lyric-editor flex-grow outline-none text-gray-200 text-lg leading-relaxed tracking-normal"
-                                                        />
-                                                        {/* Syllable Count Column */}
-                                                        <div className={`pl-4 w-14 text-right transition-opacity duration-300 flex flex-col items-end gap-[0px] ${showSyllableCount ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                                                            {section.lyrics.map((lyric, lineIndex) => {
-                                                                const counts = (lineCountsBySection[section.id] || [])[lineIndex];
-
-                                                                const renderPill = (val: number | null) => (
-                                                                    <div className="text-lg leading-relaxed flex items-center justify-end h-[1.75em]">
-                                                                        {val !== null && val > 0 && (
-                                                                            <span className="inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5 text-[10px] font-mono font-medium text-gray-400 bg-white/5 border border-white/5 rounded-full tabular-nums">
-                                                                                {val}
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                );
-
-                                                                if (!lyric.html.trim()) {
-                                                                    return <div key={lyric.id} className="text-lg leading-relaxed">{'\u00A0'}</div>;
-                                                                }
-
-                                                                if (counts && counts.length > 1) {
-                                                                    return (
-                                                                        <div key={lyric.id}>
-                                                                            {counts.map((count, wrapIndex) => (
-                                                                                <React.Fragment key={wrapIndex}>
-                                                                                    {renderPill(count)}
-                                                                                </React.Fragment>
-                                                                            ))}
-                                                                        </div>
-                                                                    );
-                                                                }
-
-                                                                const fallbackCount = getSyllableCount(lyric.html);
-                                                                const singleCount = (counts && counts.length === 1) ? counts[0] : fallbackCount;
-                                                                return (
-                                                                    <React.Fragment key={lyric.id}>
-                                                                        {renderPill(singleCount)}
-                                                                    </React.Fragment>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
+                                                <span className="text-xs font-bold w-5 h-5 flex items-center justify-center">U</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowSyllableCount(prev => !prev)}
+                                                aria-label="Toggle syllable count"
+                                                className={`p-2 rounded-full hover:bg-white/10 transition-colors ${showSyllableCount ? 'text-white bg-white/10' : 'text-gray-400'}`}
+                                            >
+                                                <span className="text-xs font-bold w-5 h-5 flex items-center justify-center">S</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsModalOpen(true)}
+                                                aria-label="Add section"
+                                                className="p-2 rounded-full hover:bg-white/10 transition-colors text-gray-400 hover:text-white"
+                                            >
+                                                <span className="text-lg leading-none w-5 h-5 flex items-center justify-center pb-0.5">+</span>
+                                            </button>
                                         </div>
                                     </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                </div>
-            </main>
 
-            {/* Modals and Overlays */}
-            {geminiModalSectionId && anchorEl && (
-                <GeminiActionModal
-                    anchorEl={anchorEl}
-                    onClose={() => setGeminiModalSectionId(null)}
-                    onAction={handleGeminiAction}
-                />
-            )}
-            {rhymePopup && <RhymePopup {...rhymePopup} />}
-            {recordingState.status === 'recording' && recordingState.startTime && (
-                <AudioRecorder
-                    startTime={recordingState.startTime}
-                    onSave={() => handleStopRecording(true)}
-                    onCancel={() => handleStopRecording(false)}
-                />
-            )}
-            {activePlayerSection && (
-                <BottomTakesPlayer
-                    className="takes-player-overlay"
-                    section={activePlayerSection}
-                    onClose={() => setActivePlayerSectionId(null)}
-                    onDeleteTake={handleDeleteTake}
-                />
-            )}
-            {isInitialState && recordingState.status !== 'recording' && <InitialControls onAddBeat={handleAddBeat} />}
+                                    {/* Title below back button */}
+                                    <input
+                                        value={activeProjectTitle}
+                                        onChange={(e) => setActiveProjectTitle(e.target.value)}
+                                        className={`bg-transparent text-3xl font-extrabold w-full outline-none tracking-tight transition-colors ${activeProjectTitle ? 'text-white' : 'text-gray-500'} placeholder-gray-500`}
+                                        placeholder="Untitled Song"
+                                    />
+                                    <SectionModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onAddSection={addSection} />
+                                </div>
 
-            {beat && (
-                <MasterPlayer beat={beat} onRemoveBeat={handleRemoveBeat} />
-            )}
+                                <div className="flex-grow overflow-y-auto custom-scrollbar" onScroll={clearRhymePopupAndTimeout}>
+                                    <div className="pt-6 px-4 md:px-8 pb-32">
+                                        {song.sections.map((section, index) => {
+                                            const isDeleting = deletingSections.has(section.id);
+                                            const currentTranslateX = (dragState?.sectionId === section.id) ? dragState.translateX : 0;
+
+                                            const isBeingDragged = reorderState?.sectionId === section.id;
+                                            let containerStyle = {};
+                                            let containerClasses = `transition-transform duration-300 ease-in-out`;
+
+                                            if (reorderState) {
+                                                const { startIndex, currentY, initialY, draggedElHeight } = reorderState;
+                                                const finalDropIndex = dropIndex ?? startIndex;
+
+                                                if (isBeingDragged) {
+                                                    containerStyle = {
+                                                        transform: `translateY(${currentY - initialY}px)`,
+                                                        zIndex: 50,
+                                                        cursor: 'grabbing',
+                                                    };
+                                                    containerClasses = '';
+                                                } else {
+                                                    let shiftAmount = 0;
+                                                    if (startIndex < finalDropIndex && index > startIndex && index <= finalDropIndex) {
+                                                        shiftAmount = -draggedElHeight - (isUnstructured ? 24 : 32);
+                                                    } else if (startIndex > finalDropIndex && index < startIndex && index >= finalDropIndex) {
+                                                        shiftAmount = draggedElHeight + (isUnstructured ? 24 : 32);
+                                                    }
+                                                    if (shiftAmount !== 0) {
+                                                        containerStyle = { transform: `translateY(${shiftAmount}px)` };
+                                                    }
+                                                }
+                                            }
+
+                                            return (
+                                                <div key={section.id}>
+                                                    <div
+                                                        className={`transition-all duration-700 ease-[cubic-bezier(0.25,0.1,0.25,1.0)] ${isUnstructured ? 'mb-0' : 'mb-8'} ${isDeleting ? 'max-h-0 opacity-0 !mb-0' : 'max-h-[800px]'}`}
+                                                    >
+                                                        <div
+                                                            ref={el => { sectionContainerRefs.current[section.id] = el; }}
+                                                            className={`relative ${containerClasses}`}
+                                                            style={containerStyle}
+                                                            onMouseDown={(e) => handleGestureStart(e, section.id)}
+                                                            onTouchStart={(e) => handleGestureStart(e, section.id)}
+                                                        >
+                                                            <div className={`absolute inset-0 rounded-xl flex justify-end items-center pr-8 pointer-events-none ${!isUnstructured ? 'bg-red-900/50' : ''}`}>
+                                                                {!isUnstructured && <TrashIcon />}
+                                                            </div>
+
+                                                            <div
+                                                                style={{ transform: `translateX(${currentTranslateX}px)` }}
+                                                                className={`relative transition-all duration-500 ease-in-out will-change-[padding,background-color,border,box-shadow] ${dragState?.sectionId === section.id && dragState?.isDragging ? '!duration-0' : ''}
+                                                                ${isUnstructured
+                                                                        ? 'bg-transparent border-l-2 border-transparent pl-4 hover:border-white/10 mb-6'
+                                                                        : 'bg-[#18181b] border border-white/5 rounded-xl p-6 shadow-lg hover:border-white/10 hover:shadow-xl'
+                                                                    }
+                                                                ${isBeingDragged ? 'shadow-2xl scale-[1.02] z-50 bg-zinc-800' : ''}
+                                                                ${activeSectionId === section.id && !isUnstructured ? 'ring-1 ring-white/10 bg-[#1c1c1f]' : ''}
+                                                                `}
+                                                            >
+                                                                <div className="flex items-center justify-between mb-4">
+                                                                    <div className="flex items-center gap-3 group">
+                                                                        <h3
+                                                                            contentEditable
+                                                                            suppressContentEditableWarning
+                                                                            dir="ltr"
+                                                                            spellCheck={false}
+                                                                            onInput={(e) => updateSectionTitle(section.id, e.currentTarget.innerText)}
+                                                                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLHeadingElement).blur(); } }}
+                                                                            onPaste={handleTitlePaste}
+                                                                            className={`w-fit font-bold tracking-wide text-xs uppercase outline-none rounded-sm px-1 -ml-1 transition-colors
+                                                                                ${isUnstructured ? 'text-gray-500 focus:text-gray-300' : 'text-gray-400 bg-white/5 py-0.5 px-2'}`}
+                                                                        >{section.title}</h3>
+                                                                        <button
+                                                                            ref={el => { geminiIconRefs.current[section.id] = el; }}
+                                                                            type="button"
+                                                                            aria-label="Gemini Actions"
+                                                                            onClick={(e) => handleGeminiIconClick(e, section.id)}
+                                                                            className={`transition-all duration-300 ease-in-out text-blue-400 hover:text-blue-300 ${activeSectionId === section.id ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}
+                                                                            tabIndex={activeSectionId === section.id ? 0 : -1}
+                                                                        >
+                                                                            <GeminiIcon className="h-4 w-4" />
+                                                                        </button>
+                                                                    </div>
+                                                                    {!isUnstructured && (
+                                                                        <div className="flex items-center space-x-1">
+                                                                            {section.takes.length > 0 && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => setActivePlayerSectionId(section.id)}
+                                                                                    className="bg-zinc-800/80 border border-white/5 rounded-full flex items-center space-x-1.5 px-3 py-1 text-xs font-medium text-gray-300 hover:bg-zinc-700 hover:text-white transition-all"
+                                                                                    aria-label={`Show ${section.takes.length} audio takes`}
+                                                                                >
+                                                                                    <MusicNoteIcon />
+                                                                                    <span>{section.takes.length}</span>
+                                                                                </button>
+                                                                            )}
+                                                                            <button
+                                                                                type="button"
+                                                                                aria-label="Record audio"
+                                                                                onClick={() => handleRecordClick(section.id)}
+                                                                                className="p-2 text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded-full transition-all"
+                                                                            >
+                                                                                <MicrophoneIcon />
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+
+                                                                <div className="flex items-start">
+                                                                    <div
+                                                                        ref={el => { sectionEditorRefs.current[section.id] = el; }}
+                                                                        contentEditable
+                                                                        data-placeholder="Start writing..."
+                                                                        data-section-id={section.id}
+                                                                        onFocus={() => { clearRhymePopupAndTimeout(); setActiveSectionId(section.id); }}
+                                                                        onBlur={clearRhymePopupAndTimeout}
+                                                                        onMouseDown={clearRhymePopupAndTimeout}
+                                                                        onTouchStart={clearRhymePopupAndTimeout}
+                                                                        onMouseUp={handleSelection}
+                                                                        onTouchEnd={handleSelection}
+                                                                        onInput={e => handleLyricsInput(section.id, e.currentTarget as HTMLDivElement)}
+                                                                        onPaste={handlePaste}
+                                                                        className="lyric-editor flex-grow outline-none text-gray-200 text-lg leading-relaxed tracking-normal"
+                                                                    />
+                                                                    {/* Syllable Count Column */}
+                                                                    <div className={`pl-4 w-14 text-right transition-opacity duration-1000 flex flex-col items-end gap-[0px] ${showSyllableCount ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                                                                        {section.lyrics.map((lyric, lineIndex) => {
+                                                                            const counts = (lineCountsBySection[section.id] || [])[lineIndex];
+
+                                                                            const renderPill = (val: number | null) => (
+                                                                                <div className="text-lg leading-relaxed flex items-center justify-end h-[1.75em]">
+                                                                                    {val !== null && val > 0 && (
+                                                                                        <span className="inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5 text-[10px] font-mono font-medium text-gray-500 tabular-nums">
+                                                                                            {val}
+                                                                                        </span>
+                                                                                    )}
+                                                                                </div>
+                                                                            );
+
+                                                                            if (!lyric.html.trim()) {
+                                                                                return <div key={lyric.id} className="text-lg leading-relaxed">{'\u00A0'}</div>;
+                                                                            }
+
+                                                                            if (counts && counts.length > 1) {
+                                                                                return (
+                                                                                    <div key={lyric.id}>
+                                                                                        {counts.map((count, wrapIndex) => (
+                                                                                            <React.Fragment key={wrapIndex}>
+                                                                                                {renderPill(count)}
+                                                                                            </React.Fragment>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                );
+                                                                            }
+
+                                                                            const fallbackCount = getSyllableCount(lyric.html);
+                                                                            const singleCount = (counts && counts.length === 1) ? counts[0] : fallbackCount;
+                                                                            return (
+                                                                                <React.Fragment key={lyric.id}>
+                                                                                    {renderPill(singleCount)}
+                                                                                </React.Fragment>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        </main>
+
+                        {/* Modals and Overlays */}
+                        {geminiModalSectionId && anchorEl && (
+                            <GeminiActionModal
+                                anchorEl={anchorEl}
+                                onClose={() => setGeminiModalSectionId(null)}
+                                onAction={handleGeminiAction}
+                            />
+                        )}
+                        {rhymePopup && <RhymePopup {...rhymePopup} />}
+                        {recordingState.status === 'recording' && recordingState.startTime && (
+                            <AudioRecorder
+                                startTime={recordingState.startTime}
+                                onSave={() => handleStopRecording(true)}
+                                onCancel={() => handleStopRecording(false)}
+                            />
+                        )}
+                        {activePlayerSection && (
+                            <BottomTakesPlayer
+                                className="takes-player-overlay"
+                                section={activePlayerSection}
+                                onClose={() => setActivePlayerSectionId(null)}
+                                onDeleteTake={handleDeleteTake}
+                            />
+                        )}
+                        {isInitialState && recordingState.status !== 'recording' && <InitialControls onAddBeat={handleAddBeat} />}
+
+                        {beat && (
+                            <MasterPlayer beat={beat} onRemoveBeat={handleRemoveBeat} />
+                        )}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+            {/* Flow Screen Page */}
+            <AnimatePresence custom={direction} mode="popLayout">
+                {currentScreen === 'flow' && (
+                    <motion.div
+                        key="flow"
+                        custom={direction}
+                        variants={pageVariants}
+                        initial="initial"
+                        animate="animate"
+                        exit="exit"
+                        className="fixed inset-0 z-50 bg-black"
+                    >
+                        <FlowScreen
+                            viewState={flowScreenState}
+                            onViewStateChange={setFlowScreenState}
+                            songTitle={activeProjectTitle || "Untitled Song"}
+                            lyrics={song.sections.flatMap(s => s.lyrics)}
+                            beatUrl={beat?.url}
+                            onBeatUpload={handleAddBeat}
+                            onBack={() => {
+                                setDirection(-1);
+                                setCurrentScreen('editor');
+                            }}
+                        />
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 };
