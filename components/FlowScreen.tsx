@@ -663,7 +663,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                 {/* Expanded Content (Minimalist Player) */}
                 {viewState === 'expanded' && (
                     <motion.div
-                        className="flex-grow flex flex-col px-6 pt-0 items-center justify-start h-full"
+                        className="flex flex-col px-6 pt-0 pb-6 items-center justify-start"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ duration: 0.3, delay: 0.2 }} // Delay to let slide finish
@@ -777,7 +777,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                         </div>
 
                         {/* Floating Action Buttons (Centered below waveform) */}
-                        <div className="flex items-center justify-center gap-8 mt-4 mb-4">
+                        <div className="flex items-center justify-center gap-8 mt-4">
 
                             {/* Volume Button */}
                             <button
