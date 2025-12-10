@@ -4,14 +4,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import SearchScreen from './SearchScreen';
 
 interface Project {
-  id: number;
+  id: string;
   title: string;
   time: string;
   gradient: string;
 }
 
 interface HomeScreenProps {
-  onNavigate: (screen: string, title: string) => void;
+  onNavigate: (screen: string, data?: { id?: string; title?: string }) => void;
   projects: Project[];
 }
 
@@ -92,7 +92,7 @@ const HomeScreen = React.forwardRef<HTMLDivElement, HomeScreenProps>(({ onNaviga
               >
                 {/* Empty State */}
                 <div className="text-center max-w-[300px]">
-                  <h3 className="text-3xl font-black uppercase text-zinc-800 leading-tight tracking-tighter">
+                  <h3 className="text-3xl font-black uppercase text-zinc-600 leading-tight tracking-tighter">
                     READY TO WRITE YOUR FIRST SONG?
                   </h3>
                 </div>
@@ -108,7 +108,7 @@ const HomeScreen = React.forwardRef<HTMLDivElement, HomeScreenProps>(({ onNaviga
                   <motion.div
                     key={project.id}
                     variants={itemVariants}
-                    onClick={() => onNavigate('editor', project.title)}
+                    onClick={() => onNavigate('editor', { id: project.id })}
                     className="flex items-center gap-4 group cursor-pointer active:scale-[0.98] transition-all p-3 -mx-3 rounded-3xl hover:bg-white/5"
                   >
                     <div className={`h-20 w-20 rounded-2xl ${project.gradient} shadow-lg shrink-0`}></div>
@@ -130,7 +130,10 @@ const HomeScreen = React.forwardRef<HTMLDivElement, HomeScreenProps>(({ onNaviga
                 <span className="text-xs font-semibold text-white">Home</span>
               </button>
               <button
-                onClick={() => onNavigate('editor', 'Untitled Song')}
+                onClick={() => {
+                  console.log("New Song button clicked");
+                  onNavigate('editor', { title: 'Untitled Song' });
+                }}
                 className="px-6 py-2.5 rounded-full flex items-center gap-2 hover:bg-white/10 transition-all text-gray-400"
               >
                 <PlusCircle size={18} />

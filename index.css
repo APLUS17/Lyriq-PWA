@@ -28,6 +28,36 @@ html {
   height: 100%;
 }
 
+/* Waveforms Container */
+.lyriq-waveforms {
+  margin-left: 40px;
+  /* Space for icons */
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 100px;
+  /* EXACT 100px for 2x 50px stacks */
+  border-radius: 8px;
+  background-color: rgba(39, 39, 42, 0.5);
+  /* zinc-800/50 */
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  /* Hide scrollbar */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.lyriq-waveforms::-webkit-scrollbar {
+  display: none;
+}
+
+.lyriq-waveforms canvas {
+  width: 100%;
+  height: 50px;
+  /* EXACT 50px height */
+  display: block;
+}
+
 /* Custom Scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
@@ -147,8 +177,8 @@ html {
   --duration-normal: 0.5s;
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --lyriq-modal-peeking-height: 96px;
-  --lyriq-modal-expanded-height: 60vh;
-  /* Using 60vh based on previous task, adjust if needed */
+  --lyriq-modal-expanded-height: 30vh;
+  /* Using 30vh based on user feedback */
 }
 
 .lyriq-controls-modal {

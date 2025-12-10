@@ -14,6 +14,26 @@ import MasterPlayer from './components/MasterPlayer';
 import HomeScreen from './components/HomeScreen';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronLeft } from 'lucide-react';
+import { saveProject, getProjectsMetadata, getProject, ProjectMetadata, StoredProject } from './services/storageService';
+
+const formatTimeAgo = (timestamp: number) => {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+    if (seconds < 60) return 'Just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return new Date(timestamp).toLocaleDateString();
+};
+
+const gradients = [
+    'bg-gradient-to-br from-pink-500 to-rose-500',
+    'bg-gradient-to-br from-purple-500 to-indigo-500',
+    'bg-gradient-to-br from-cyan-500 to-blue-500',
+    'bg-gradient-to-br from-emerald-500 to-teal-500',
+    'bg-gradient-to-br from-orange-500 to-red-500',
+];
+const getRandomGradient = () => gradients[Math.floor(Math.random() * gradients.length)];
 
 
 // Page animation variants
@@ -42,12 +62,12 @@ const pageVariants = {
     }),
 };
 
-const initialSectionId = crypto.randomUUID();
-const initialSong: Song = {
+
+const getInitialSong = (): Song => ({
     sections: [
-        { id: initialSectionId, title: 'Intro', lyrics: [], takes: [] }
+        { id: crypto.randomUUID(), title: 'Intro', lyrics: [], takes: [] }
     ],
-};
+});
 
 const blobToBase64 = (blob: Blob): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -75,16 +95,18 @@ const App: React.FC = () => {
     // Navigation state
     const [currentScreen, setCurrentScreen] = useState<'home' | 'editor' | 'flow'>('home');
     const [activeProjectTitle, setActiveProjectTitle] = useState('');
+    const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+    const [activeProjectGradient, setActiveProjectGradient] = useState<string>('');
     const [direction, setDirection] = useState(0); // 1 = forward, -1 = back
-    const [projects, setProjects] = useState<any[]>([]);
+    const [projects, setProjects] = useState<any[]>([]); // We'll map ProjectMetadata to the view model
 
-    const [song, setSong] = useState<Song>(initialSong);
+    const [song, setSong] = useState<Song>(getInitialSong);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [flowScreenState, setFlowScreenState] = useState<'hidden' | 'peeking' | 'expanded'>('peeking');
     const [isUnstructured, setIsUnstructured] = useState(true);
     const [showSyllableCount, setShowSyllableCount] = useState(false);
     const sectionEditorRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
-    const [activeSectionId, setActiveSectionId] = useState<string | null>(initialSectionId);
+    const [activeSectionId, setActiveSectionId] = useState<string | null>(song.sections[0]?.id || null);
     const [geminiModalSectionId, setGeminiModalSectionId] = useState<string | null>(null);
     const geminiIconRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
 
@@ -188,6 +210,71 @@ const App: React.FC = () => {
             timeouts.forEach(clearTimeout);
         };
     }, []);
+
+    // Load projects on mount
+    const loadProjects = async () => {
+        try {
+            const metadatas = await getProjectsMetadata();
+            const viewProjects = metadatas.map(m => ({
+                id: m.id,
+                title: m.title,
+                time: formatTimeAgo(m.updatedAt),
+                gradient: m.gradient
+            }));
+            setProjects(viewProjects);
+        } catch (error) {
+            console.error("Failed to load projects:", error);
+        }
+    };
+
+    useEffect(() => {
+        loadProjects();
+    }, []);
+
+    const saveCurrentState = async () => {
+        if (!activeProjectId) return;
+
+        // If we don't have a gradient set yet, find it or generate it
+        let gradient = activeProjectGradient;
+        if (!gradient) {
+            const currentProjectInList = projects.find(p => p.id === activeProjectId);
+            gradient = currentProjectInList?.gradient || getRandomGradient();
+            setActiveProjectGradient(gradient);
+        }
+
+        const projectToSave: StoredProject = {
+            id: activeProjectId,
+            title: activeProjectTitle || 'Untitled Song',
+            song: song,
+            updatedAt: Date.now(),
+            createdAt: Date.now(), // technically should preserve original, but simplified for now
+            gradient: gradient
+        };
+
+        try {
+            await saveProject(projectToSave);
+            // Don't reload projects list here to avoid UI flickering/loops, 
+            // the autosave effect handles list refresh if needed, or we do it on nav
+        } catch (e) {
+            console.error("Autosave failed", e);
+        }
+    };
+
+    // Autosave Effect
+    useEffect(() => {
+        if (!activeProjectId) return;
+
+        const saveTimeout = setTimeout(async () => {
+            await saveCurrentState();
+            loadProjects(); // Keep list updated with "Just now"
+        }, 1000); // Debounce 1s
+
+        return () => clearTimeout(saveTimeout);
+    }, [song, activeProjectTitle, activeProjectId]); // Helper is not a dep if defined in component body and uses updated state closures? No, standard functional component closures. 
+    // Actually, saveCurrentState closes over the CURRENT render scope. 
+    // When effect runs, it uses saveCurrentState from THAT render. 
+    // So it sees the correct song/title from that render.
+
 
     const handleSplashComplete = () => {
         setShowSplash(false);
@@ -746,14 +833,66 @@ const App: React.FC = () => {
     const activePlayerSection = song.sections.find(s => s.id === activePlayerSectionId);
 
     // Navigation handler
-    const handleNavigate = (screen: string, title?: string) => {
+    const handleNavigate = async (screen: string, data?: { id?: string; title?: string }) => {
+        console.log("handleNavigate called", { screen, data, activeProjectId });
+        // Force save current state before navigating away if we are in a project
+        if (activeProjectId) {
+            await saveCurrentState();
+        }
+
         if (screen === 'editor') {
             setDirection(1); // Forward
-            if (title) setActiveProjectTitle(title);
+
+            if (data?.id) {
+                // Open existing project
+                try {
+                    const project = await getProject(data.id);
+                    if (project) {
+                        setSong(project.song);
+                        setActiveProjectTitle(project.title);
+                        setActiveProjectId(project.id);
+                        setActiveProjectGradient(project.gradient);
+                        setActiveSectionId(project.song.sections[0]?.id || null);
+                    }
+                } catch (e) {
+                    console.error("Error loading project", e);
+                }
+            } else if (data?.title) {
+                // Create new project
+                const newId = crypto.randomUUID();
+                const newGradient = getRandomGradient();
+                const newSong = getInitialSong();
+
+                setSong(newSong);
+                setActiveProjectTitle(data.title);
+                setActiveProjectId(newId);
+                setActiveProjectGradient(newGradient);
+                setActiveSectionId(newSong.sections[0]?.id || null);
+
+                // Initial save
+                const newProject: StoredProject = {
+                    id: newId,
+                    title: data.title,
+                    song: newSong,
+                    updatedAt: Date.now(),
+                    createdAt: Date.now(),
+                    gradient: newGradient
+                };
+
+                try {
+                    await saveProject(newProject);
+                    loadProjects();
+                } catch (e) {
+                    console.error("Failed to save new project", e);
+                }
+            }
+
             setCurrentScreen('editor');
         } else if (screen === 'home') {
+            await loadProjects(); // Ensure refreshing listing
             setDirection(-1); // Back
             setCurrentScreen('home');
+            setActiveProjectId(null); // Clear active project so autosave stops
         }
     };
 

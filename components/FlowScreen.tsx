@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Play, Pause, Mic, Music, ChevronDown, Rewind, FastForward, Volume2 } from 'lucide-react';
+import { Play, Pause, Mic, Music, ChevronDown, Rewind, FastForward, Volume2, Edit2, Check } from 'lucide-react';
 import { motion, PanInfo } from 'framer-motion';
 import { TimedWord, TimedLine } from '../types';
-import { findLineIndexAtTime, HIGHLIGHT_LOOKAHEAD } from '../services/lyriqTranscriptionService';
+import { findLineIndexAtTime, HIGHLIGHT_LOOKAHEAD, transcribeAndGroupAudio } from '../services/lyriqTranscriptionService';
 import { drawCenteredWaveform, decodeAudioFromUrl } from '../services/canvasWaveformService';
 import { playBothTracks, pauseBothTracks, seekBothTracks } from '../services/audioSyncService';
 import { getTimeFromEvent } from '../services/scrubbingService';
@@ -36,6 +36,16 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
     // Synced Lyrics State
     const [currentLineIndex, setCurrentLineIndex] = useState(0);
     const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+
+    // Local Transcription State
+    const [isTranscribing, setIsTranscribing] = useState(false);
+    const [localSyncedWords, setLocalSyncedWords] = useState<TimedWord[] | null>(null);
+    const [localSyncedLines, setLocalSyncedLines] = useState<TimedLine[] | null>(null);
+
+    // Editing State
+    const [isEditing, setIsEditing] = useState(false);
+    const [editingLineIndex, setEditingLineIndex] = useState<number | null>(null);
+    const [editText, setEditText] = useState('');
 
     // Refs
     const audioContextRef = useRef<AudioContext | null>(null);
@@ -81,13 +91,31 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
 
     // Time update loop
     useEffect(() => {
-        if (isPlaying && beatPlayerRef.current) {
-            const animate = () => {
-                if (beatPlayerRef.current) {
+        let startTime = Date.now() - (currentTime * 1000);
+
+        const animate = () => {
+            if (isPlaying) {
+                if (beatPlayerRef.current && !beatPlayerRef.current.paused) {
                     setCurrentTime(beatPlayerRef.current.currentTime);
+                } else if (vocalPlayerRef.current && !vocalPlayerRef.current.paused) {
+                    setCurrentTime(vocalPlayerRef.current.currentTime);
                 }
-                animationFrameRef.current = requestAnimationFrame(animate);
-            };
+            } else if (isRecording) {
+                // If recording without beat playback, update time manually
+                if (!isPlaying) {
+                    const now = Date.now();
+                    setCurrentTime((now - startTime) / 1000);
+                }
+            }
+            animationFrameRef.current = requestAnimationFrame(animate);
+        };
+
+        if (isPlaying || isRecording) {
+            // Reset start time reference if starting fresh
+            if (!isPlaying && isRecording) {
+                startTime = Date.now() - (currentTime * 1000);
+            }
+
             animationFrameRef.current = requestAnimationFrame(animate);
         } else {
             if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
@@ -96,7 +124,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
         return () => {
             if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
         };
-    }, [isPlaying]);
+    }, [isPlaying, isRecording]);
 
     // Update duration when beat loads and decode audio for waveform
     useEffect(() => {
@@ -132,10 +160,12 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
 
     // Auto-scroll and highlighting effect
     useEffect(() => {
-        if (!syncedLines || syncedLines.length === 0 || !isPlaying) return;
+        const activeLines = localSyncedLines || syncedLines;
+
+        if (!activeLines || activeLines.length === 0 || !isPlaying) return;
 
         const lookaheadTime = currentTime + HIGHLIGHT_LOOKAHEAD;
-        const newLineIndex = findLineIndexAtTime(lookaheadTime, syncedLines);
+        const newLineIndex = findLineIndexAtTime(lookaheadTime, activeLines);
 
         if (newLineIndex !== currentLineIndex && newLineIndex >= 0) {
             setCurrentLineIndex(newLineIndex);
@@ -144,11 +174,11 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
             if (autoScrollEnabled && lineElementsRef.current[newLineIndex]) {
                 lineElementsRef.current[newLineIndex]?.scrollIntoView({
                     behavior: 'smooth',
-                    block: 'start'
+                    block: 'center'
                 });
             }
         }
-    }, [currentTime, syncedLines, isPlaying, currentLineIndex, autoScrollEnabled]);
+    }, [currentTime, syncedLines, localSyncedLines, isPlaying, currentLineIndex, autoScrollEnabled]);
 
     // Disable auto-scroll when user manually scrolls
     const handleUserScroll = useCallback(() => {
@@ -183,17 +213,22 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // Set canvas size based on container
+        // Set canvas size based on its actual rendered size (controlled by CSS)
         const resizeCanvas = () => {
-            const container = canvas.parentElement;
-            if (container) {
-                const dpr = window.devicePixelRatio || 1;
-                const rect = container.getBoundingClientRect();
-                canvas.width = rect.width * dpr;
-                canvas.height = rect.height * dpr;
+            const dpr = window.devicePixelRatio || 1;
+            // Use canvas rect, not container, because container holds both canvases now
+            const rect = canvas.getBoundingClientRect();
+
+            // Avoid zero-size issues if hidden
+            if (rect.width === 0 || rect.height === 0) return;
+
+            const newWidth = rect.width * dpr;
+            const newHeight = rect.height * dpr;
+
+            if (canvas.width !== newWidth || canvas.height !== newHeight) {
+                canvas.width = newWidth;
+                canvas.height = newHeight;
                 ctx.scale(dpr, dpr);
-                canvas.style.width = `${rect.width}px`;
-                canvas.style.height = `${rect.height}px`;
             }
         };
 
@@ -227,15 +262,18 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
 
         // Set canvas size
         const resizeCanvas = () => {
-            const container = canvas.parentElement;
-            if (container) {
-                const dpr = window.devicePixelRatio || 1;
-                const rect = container.getBoundingClientRect();
-                canvas.width = rect.width * dpr;
-                canvas.height = rect.height * dpr;
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+
+            if (rect.width === 0 || rect.height === 0) return;
+
+            const newWidth = rect.width * dpr;
+            const newHeight = rect.height * dpr;
+
+            if (canvas.width !== newWidth || canvas.height !== newHeight) {
+                canvas.width = newWidth;
+                canvas.height = newHeight;
                 ctx.scale(dpr, dpr);
-                canvas.style.width = `${rect.width}px`;
-                canvas.style.height = `${rect.height}px`;
             }
         };
 
@@ -257,13 +295,14 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
         if (!ctx) return;
 
         if (isPlaying) {
-            pauseBothTracks(beatPlayerRef.current, vocalPlayerRef.current);
+            pauseBothTracks(beatPlayerRef.current!, vocalPlayerRef.current);
             setIsPlaying(false);
         } else {
-            // Only try to connect the source if a beat is loaded
-            if (beatPlayerRef.current && beatUrl) {
-                // Connect beat track to audio context
-                if (!beatSourceNodeRef.current) {
+            // Check if we have EITHER a beat OR a vocal track to play
+            if ((beatPlayerRef.current && beatUrl) || (vocalPlayerRef.current && vocalUrl)) {
+
+                // Connect beat track to audio context if exists
+                if (beatPlayerRef.current && beatUrl && !beatSourceNodeRef.current) {
                     try {
                         beatSourceNodeRef.current = ctx.createMediaElementSource(beatPlayerRef.current);
                         beatSourceNodeRef.current.connect(ctx.destination);
@@ -278,7 +317,13 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                     } catch (e) { /* console.warn("Vocal source already connected", e); */ }
                 }
 
-                // Play both tracks in sync
+                // Auto-rewind if at end
+                if (currentTime >= duration && duration > 0) {
+                    seekBothTracks(0, beatPlayerRef.current, vocalPlayerRef.current);
+                    setCurrentTime(0);
+                }
+
+                // Play available tracks
                 await playBothTracks(beatPlayerRef.current, vocalPlayerRef.current);
                 setIsPlaying(true);
             }
@@ -419,6 +464,11 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                     try {
                         const buffer = await decodeAudioFromUrl(url, ctx);
                         setVocalAudioBuffer(buffer);
+
+                        // Update duration if we don't have one (acapella) or if vocal is longer
+                        if (duration === 0 || buffer.duration > duration) {
+                            setDuration(buffer.duration);
+                        }
                     } catch (err) {
                         console.error('Failed to decode vocal recording:', err);
                     }
@@ -426,6 +476,20 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                     // Stop all tracks in the stream
                     stream.getTracks().forEach(track => track.stop());
                     setIsRecording(false);
+
+                    // Start Transcription
+                    setIsTranscribing(true);
+                    try {
+                        const { words, lines } = await transcribeAndGroupAudio(audioBlob);
+                        setLocalSyncedWords(words);
+                        setLocalSyncedLines(lines);
+                        console.log('Transcription complete:', words, lines);
+                    } catch (error) {
+                        console.error('Transcription failed:', error);
+                        alert('Transcription failed. Please try again.');
+                    } finally {
+                        setIsTranscribing(false);
+                    }
                 };
 
                 mediaRecorderRef.current.start();
@@ -441,6 +505,76 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                 alert('Could not access microphone. Please ensure permissions are granted.');
             }
         }
+    };
+
+    // Editing Handlers
+    const handleEditToggle = () => {
+        if (isEditing) {
+            setIsEditing(false);
+            setEditingLineIndex(null);
+            setAutoScrollEnabled(true);
+        } else {
+            setIsEditing(true);
+            // If using props data, copy to local state to enable editing
+            if (!localSyncedLines && syncedLines) {
+                setLocalSyncedLines(syncedLines);
+                setLocalSyncedWords(syncedWords || []);
+            }
+            setAutoScrollEnabled(false);
+            setIsPlaying(false); // Pause when starting to edit
+            if (beatPlayerRef.current) beatPlayerRef.current.pause();
+            if (vocalPlayerRef.current) vocalPlayerRef.current.pause();
+        }
+    };
+
+    const startEditingLine = (index: number, text: string, e: React.MouseEvent) => {
+        if (!isEditing) return;
+        e.stopPropagation();
+        setEditingLineIndex(index);
+        setEditText(text);
+    };
+
+    const saveLineEdit = () => {
+        if (editingLineIndex === null || !localSyncedLines) return;
+
+        const index = editingLineIndex;
+        const newText = editText.trim();
+        if (!newText) {
+            setEditingLineIndex(null);
+            return;
+        }
+
+        const currentLine = localSyncedLines[index];
+
+        // 1. Update Line Text
+        const updatedLines = [...localSyncedLines];
+        updatedLines[index] = { ...currentLine, text: newText };
+        setLocalSyncedLines(updatedLines);
+
+        // 2. Redistribute Words (Time-Lock)
+        // If we have local words, we update them. If not, we just update the line text.
+        if (localSyncedWords) {
+            const start = currentLine.start;
+            const end = currentLine.end;
+            const duration = end - start;
+            const newWordsList = newText.split(/\s+/);
+            const timePerWord = duration / Math.max(1, newWordsList.length);
+
+            const newTimedWords = newWordsList.map((word, i) => ({
+                word,
+                start: start + (i * timePerWord),
+                end: start + ((i + 1) * timePerWord)
+            }));
+
+            // Remove old words strictly within this line's range
+            const updatedWords = localSyncedWords.filter(w => !(w.start >= start && w.end - 0.001 <= end));
+            // Add new words and resort
+            const finalWords = [...updatedWords, ...newTimedWords].sort((a, b) => a.start - b.start);
+
+            setLocalSyncedWords(finalWords);
+        }
+
+        setEditingLineIndex(null);
     };
 
     // Helper to format time
@@ -498,12 +632,22 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                     <ChevronDown className="rotate-90" size={28} />
                 </button>
                 <div className="flex flex-col items-center">
-                    <h1 className="text-white font-extrabold text-2xl flex items-center gap-2">
+                    <h1 className={`text-white font-extrabold flex items-center gap-2 transition-all duration-700 ease-out 
+                        ${((localSyncedLines && localSyncedLines.length > 0) || (syncedLines && syncedLines.length > 0)) ? 'text-2xl mt-0' : 'text-4xl mt-0'}`}>
                         {songTitle}
-                        <span className="p-1 bg-zinc-800 rounded-full text-pink-500"><div className="w-3 h-3 border-2 border-current rounded-sm" /></span>
                     </h1>
                 </div>
-                <div className="w-10" /> {/* Spacer */}
+                <div className="w-10">
+                    {/* Show Edit button if we have synced lyrics */}
+                    {((localSyncedLines && localSyncedLines.length > 0) || (syncedLines && syncedLines.length > 0)) && !isTranscribing && (
+                        <button
+                            onClick={handleEditToggle}
+                            className={`p-2 transition-colors ${isEditing ? 'text-pink-500' : 'text-gray-400 hover:text-white'}`}
+                        >
+                            {isEditing ? <Check size={24} /> : <Edit2 size={24} />}
+                        </button>
+                    )}
+                </div>
             </div>
 
             {/* Lyrics Area (Main Page Content) */}
@@ -513,39 +657,61 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                 style={{ scrollSnapType: 'y mandatory' }}
                 onScroll={handleUserScroll}
             >
-                {syncedLines && syncedLines.length > 0 ? (
+                {isTranscribing ? (
+                    <div className="flex flex-col items-center justify-center space-y-4 animate-pulse">
+                        <div className="w-8 h-8 border-4 border-pink-500 border-t-transparent rounded-full animate-spin" />
+                        <p className="text-zinc-400 font-medium">Transcribing your flow...</p>
+                    </div>
+                ) : (localSyncedLines && localSyncedLines.length > 0) || (syncedLines && syncedLines.length > 0) ? (
                     /* Synced Lyrics Mode - with word-level highlighting */
-                    syncedLines.map((line, i) => (
+                    (localSyncedLines || syncedLines)!.map((line, i) => (
                         <p
                             key={i}
                             ref={el => { lineElementsRef.current[i] = el; }}
-                            className={`lyriq-line text-3xl font-extrabold transition-all duration-500 cursor-default p-2 rounded-lg 
-                                ${i === currentLineIndex ? 'text-white scale-105 bg-pink-500/10 highlighted-line' : 'text-zinc-600'}`}
-                            style={{ scrollSnapAlign: 'center', minHeight: '50px' }}
+                            onClick={(e) => startEditingLine(i, line.text, e)}
+                            className={`lyriq-line text-3xl font-extrabold transition-all duration-700 cursor-default p-4 rounded-xl 
+                                ${i === currentLineIndex ? 'text-white scale-110 bg-white/5 shadow-2xl shadow-pink-500/10 blur-none highlighted-line' : 'text-zinc-600 scale-95 blur-[1px] opacity-50 hover:opacity-80 hover:blur-none transition-opacity'}
+                                ${isEditing ? 'hover:bg-zinc-800 cursor-text border border-dashed border-zinc-700' : ''}`}
+                            style={{ scrollSnapAlign: 'center', minHeight: '60px' }}
                             data-start={line.start}
                             data-end={line.end}
                         >
-                            {/* Render words with individual data attributes for karaoke effect */}
-                            {syncedWords ? (() => {
-                                // Filter syncedWords to only words within this line's time range
-                                const lineWords = syncedWords.filter(w =>
-                                    w.start >= line.start && w.end <= line.end
-                                );
-                                return lineWords.map((timedWord, wordIdx) => {
-                                    const isHighlighted = currentTime >= timedWord.start;
-                                    return (
-                                        <span
-                                            key={wordIdx}
-                                            className={`lyriq-word ${isHighlighted ? 'highlighted-word' : ''}`}
-                                            data-start={timedWord.start}
-                                            data-end={timedWord.end}
-                                        >
-                                            {timedWord.word}{' '}
-                                        </span>
+                            {editingLineIndex === i ? (
+                                <input
+                                    autoFocus
+                                    className="bg-transparent text-center w-full outline-none text-pink-500 selection:bg-pink-500/30"
+                                    value={editText}
+                                    onChange={(e) => setEditText(e.target.value)}
+                                    onBlur={saveLineEdit}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') saveLineEdit();
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+                            ) : (
+                                /* Render words with individual data attributes for karaoke effect */
+                                (localSyncedWords || syncedWords) ? (() => {
+                                    // Filter syncedWords to only words within this line's time range
+                                    const wordsSource = localSyncedWords || syncedWords;
+                                    const lineWords = wordsSource!.filter(w =>
+                                        w.start >= line.start && w.end <= line.end
                                     );
-                                });
-                            })() : (
-                                line.text
+                                    return lineWords.map((timedWord, wordIdx) => {
+                                        const isHighlighted = currentTime >= timedWord.start;
+                                        return (
+                                            <span
+                                                key={wordIdx}
+                                                className={`lyriq-word ${isHighlighted ? 'highlighted-word' : ''}`}
+                                                data-start={timedWord.start}
+                                                data-end={timedWord.end}
+                                            >
+                                                {timedWord.word}{' '}
+                                            </span>
+                                        );
+                                    });
+                                })() : (
+                                    line.text
+                                )
                             )}
                         </p>
                     ))
@@ -563,13 +729,13 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                         </p>
                     ))
                 ) : (
-                    <p className="text-zinc-600 text-3xl font-bold mt-20">Type your lyrics and flow begins here.</p>
+                    <p className="text-zinc-600 text-3xl font-bold mt-20">Find Your Flow</p>
                 )}
             </div>
 
             {/* Slide-Up Player Modal (CSS Transition) */}
             <div
-                className={`lyriq-controls-modal ${viewState === 'expanded' ? 'visible' : viewState === 'peeking' ? 'peeking' : 'hidden'}`}
+                className={`lyriq-controls-modal ${viewState === 'expanded' ? 'visible' : viewState === 'peeking' ? 'peeking' : 'hidden'} ${beatUrl ? 'has-beat' : ''}`}
                 onClick={() => {
                     if (viewState === 'peeking') onViewStateChange('expanded');
                 }}
@@ -655,48 +821,38 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                         <div className="relative w-full">
 
                             {/* Track Icons - Absolute position left of the waveform */}
-                            <div className="absolute top-1/2 -translate-y-1/2 left-0 -ml-1 flex flex-col items-center justify-around h-20 text-zinc-500">
-                                <Music size={20} className={beatUrl ? "text-pink-500" : "text-zinc-500"} title="Beat Track" />
-                                <div className="h-4"></div> {/* Small spacer */}
+                            {/* Track Icons - Absolute position left of the waveform */}
+                            <div className="absolute top-1/2 -translate-y-1/2 left-0 -ml-1 flex flex-col items-center justify-around h-20 text-zinc-500 z-10">
+                                <div
+                                    className="cursor-pointer hover:text-white transition-colors p-1"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        fileInputRef.current?.click();
+                                    }}
+                                >
+                                    <Music size={20} className={beatUrl ? "text-pink-500" : "text-zinc-500"} title="Upload Beat" />
+                                </div>
+                                <div className="h-2"></div> {/* Small spacer */}
                                 <Mic size={20} className={isRecording ? "text-red-500" : "text-zinc-500"} title="Vocal Track" />
                             </div>
 
                             {/* Waveform Container - Dual Track Stack */}
                             <div
                                 ref={waveformContainerRef}
-                                className="ml-10 h-24 bg-zinc-800/50 rounded-lg relative overflow-hidden cursor-pointer"
+                                className="lyriq-waveforms cursor-pointer"
                                 onMouseDown={handleScrubStart}
                                 onTouchStart={handleScrubStart}
                             >
-                                {/* Beat Track Waveform (Bottom Layer) */}
-                                <div className="absolute inset-0 flex items-end p-2 pointer-events-none">
-                                    {beatAudioBuffer ? (
-                                        <canvas
-                                            ref={beatWaveformCanvasRef}
-                                            className="w-full h-1/2"
-                                        />
-                                    ) : (
-                                        <div className="w-full h-1/2 flex items-center justify-center gap-0.5 opacity-30">
-                                            {Array.from({ length: 100 }).map((_, i) => (
-                                                <div
-                                                    key={i}
-                                                    className="w-0.5 bg-zinc-600 rounded-full"
-                                                    style={{ height: `${Math.max(5, Math.random() * 60)}%` }}
-                                                />
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Vocal Track Waveform (Top Layer) */}
-                                {vocalAudioBuffer && (
-                                    <div className="absolute inset-0 flex items-start p-2">
-                                        <canvas
-                                            ref={vocalWaveformCanvasRef}
-                                            className="w-full h-1/2"
-                                        />
-                                    </div>
-                                )}
+                                <canvas
+                                    ref={beatWaveformCanvasRef}
+                                    id="beatWaveformCanvas"
+                                    width={3344}
+                                />
+                                <canvas
+                                    ref={vocalWaveformCanvasRef}
+                                    id="vocalWaveformCanvas"
+                                    width={3344}
+                                />
                             </div>
 
                             {/* Volume Mixer Overlay */}
@@ -770,11 +926,11 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
 
                             {/* Record Button */}
                             <button
-                                className={`py-2.5 px-4 rounded-full transition-all duration-300 ${isRecording ? 'bg-red-600 text-white animate-pulse shadow-2xl shadow-red-900' : 'bg-red-600 hover:bg-red-700 shadow-lg shadow-red-900'}`}
+                                className={`py-2.5 px-4 rounded-full transition-all duration-300 ${isRecording ? 'bg-red-600 text-white animate-pulse' : 'bg-red-600 hover:bg-red-700'}`}
                                 onClick={toggleRecording}
                                 title={isRecording ? "Stop Recording" : "Start Recording"}
                             >
-                                <div className={`w-8 h-8 rounded-full ${isRecording ? 'bg-white' : 'bg-red-500/0'}`} />
+                                <div className={`w-8 h-8 transition-all duration-300 bg-white ${isRecording ? 'rounded-md scale-50' : 'rounded-full scale-50'}`} />
                             </button>
 
                             {/* Play/Pause Button */}

@@ -17,6 +17,8 @@ export function drawStaticWaveform(ctx: CanvasRenderingContext2D, buffer: AudioB
     const amp = height / 2;
     const progressPixels = width * progress;
 
+    // Reset transform to ensure we draw in physical pixels
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
     const drawBars = (from: number, to: number, color: string) => {
@@ -62,6 +64,8 @@ export function drawCenteredWaveform(ctx: CanvasRenderingContext2D, buffer: Audi
     const centerY = height / 2;
     const progressPixels = width * progress;
 
+    // Reset transform to ensure we draw in physical pixels
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
     // Draw waveform bars centered vertically
@@ -75,7 +79,7 @@ export function drawCenteredWaveform(ctx: CanvasRenderingContext2D, buffer: Audi
             if (datum > max) max = datum;
         }
 
-        const barHeight = Math.max(1, (max - min) * centerY * 0.9);
+        const barHeight = Math.max(1, (max - min) * centerY * 0.8);
         const isPlayed = i < progressPixels;
 
         // Color: pink for played, zinc for unplayed
