@@ -28,6 +28,32 @@ html {
   height: 100%;
 }
 
+/* Smooth Scroll for Lyrics Container */
+.lyriq-player-view {
+  scroll-behavior: smooth;
+}
+
+/* Line Click Feedback Animation */
+.lyriq-line:active:not(.cursor-text) {
+  transform: scale(0.98) !important;
+}
+
+@keyframes seek-pulse {
+
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.seek-pulse {
+  animation: seek-pulse 0.3s ease-out;
+}
+
 /* Waveforms Container */
 .lyriq-waveforms {
   margin-left: 40px;
@@ -179,8 +205,14 @@ html {
   --lyriq-modal-peeking-height: 96px;
   --lyriq-modal-expanded-height: 30vh;
   /* Using 30vh based on user feedback */
+  /* Karaoke Variables */
+  --transition-normal: 0.3s ease;
+  --color-text-tertiary: #71717a;
+  /* zinc-500 */
+  --color-text: #ffffff;
 }
 
+/* Modal styles continue below */
 .lyriq-controls-modal {
   position: absolute;
   bottom: 0;

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Play, Pause, Mic, Music, ChevronDown, Rewind, FastForward, Volume2, Edit2, Check } from 'lucide-react';
 import { motion, PanInfo } from 'framer-motion';
 import { TimedWord, TimedLine } from '../types';
-import { findLineIndexAtTime, HIGHLIGHT_LOOKAHEAD, transcribeAndGroupAudio } from '../services/lyriqTranscriptionService';
+import { transcribeAndGroupAudio } from '../services/lyriqTranscriptionService';
 import { drawCenteredWaveform, decodeAudioFromUrl } from '../services/canvasWaveformService';
 import { playBothTracks, pauseBothTracks, seekBothTracks } from '../services/audioSyncService';
 import { getTimeFromEvent } from '../services/scrubbingService';
@@ -42,11 +42,6 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
     const [localSyncedWords, setLocalSyncedWords] = useState<TimedWord[] | null>(null);
     const [localSyncedLines, setLocalSyncedLines] = useState<TimedLine[] | null>(null);
 
-    // Editing State
-    const [isEditing, setIsEditing] = useState(false);
-    const [editingLineIndex, setEditingLineIndex] = useState<number | null>(null);
-    const [editText, setEditText] = useState('');
-
     // Refs
     const audioContextRef = useRef<AudioContext | null>(null);
     const beatPlayerRef = useRef<HTMLAudioElement | null>(null);
@@ -58,6 +53,9 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
     const lineElementsRef = useRef<(HTMLParagraphElement | null)[]>([]);
     const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
     const scrollTimeoutRef = useRef<number | null>(null);
+    const lastScrollY = useRef(0);
+    const lastScrollTime = useRef(0);
+    const modalCollapseTimeoutRef = useRef<number | null>(null);
     const beatWaveformCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const vocalWaveformCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const waveformAnimationRef = useRef<number | null>(null);
@@ -159,15 +157,35 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
     }, [beatUrl, initAudioContext]);
 
     // Auto-scroll and highlighting effect
+    // Line-by-Line Sync Logic (Apple Music Style)
+    // Helper to find active line efficiently (backwards iteration)
+    const findLineIndexAtTime = (time: number, lines: TimedLine[]): number => {
+        if (!lines || lines.length === 0) return -1;
+        // Loop backwards to find the active line efficiently
+        for (let i = lines.length - 1; i >= 0; i--) {
+            if (lines[i].start <= time) {
+                // If the line has an explicit end time and we passed it, skip
+                if (lines[i].end && time > lines[i].end!) {
+                    continue;
+                }
+                return i;
+            }
+        }
+        return -1;
+    };
+
+    const HIGHLIGHT_OFFSET = 0.15; // 0.15s lookahead
+
+    // Auto-scroll and highlighting effect
     useEffect(() => {
         const activeLines = localSyncedLines || syncedLines;
 
         if (!activeLines || activeLines.length === 0 || !isPlaying) return;
 
-        const lookaheadTime = currentTime + HIGHLIGHT_LOOKAHEAD;
+        const lookaheadTime = currentTime + HIGHLIGHT_OFFSET;
         const newLineIndex = findLineIndexAtTime(lookaheadTime, activeLines);
 
-        if (newLineIndex !== currentLineIndex && newLineIndex >= 0) {
+        if (newLineIndex !== currentLineIndex) {
             setCurrentLineIndex(newLineIndex);
 
             // Auto-scroll to active line
@@ -180,8 +198,37 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
         }
     }, [currentTime, syncedLines, localSyncedLines, isPlaying, currentLineIndex, autoScrollEnabled]);
 
-    // Disable auto-scroll when user manually scrolls
+    // Disable auto-scroll when user manually scrolls + smart modal behavior
     const handleUserScroll = useCallback(() => {
+        const now = Date.now();
+        // Throttle to max once per 100ms
+        if (now - lastScrollTime.current < 100) return;
+        lastScrollTime.current = now;
+
+        const currentScrollY = lyricsContainerRef.current?.scrollTop || 0;
+        const scrollDelta = currentScrollY - lastScrollY.current;
+        lastScrollY.current = currentScrollY;
+
+        // Detect scroll direction and update modal state
+        if (Math.abs(scrollDelta) > 5) { // Ignore tiny movements
+            // Clear existing modal timeout
+            if (modalCollapseTimeoutRef.current) {
+                clearTimeout(modalCollapseTimeoutRef.current);
+            }
+
+            // Debounce modal state change (200ms)
+            modalCollapseTimeoutRef.current = window.setTimeout(() => {
+                if (scrollDelta > 0 && viewState === 'expanded') {
+                    // Scrolling down → collapse to peek
+                    onViewStateChange('peeking');
+                } else if (scrollDelta < 0 && viewState === 'peeking') {
+                    // Scrolling up → expand
+                    onViewStateChange('expanded');
+                }
+                modalCollapseTimeoutRef.current = null;
+            }, 200);
+        }
+
         if (isPlaying) {
             setAutoScrollEnabled(false);
             // Clear existing timeout if any
@@ -194,13 +241,37 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                 scrollTimeoutRef.current = null;
             }, 3000);
         }
-    }, [isPlaying]);
+    }, [isPlaying, viewState, onViewStateChange]);
 
-    // Cleanup timeout on unmount
+    // Click-to-seek: Jump playback to clicked line
+    const handleLineClick = useCallback((lineIndex: number) => {
+        const lines = localSyncedLines || syncedLines;
+        const line = lines?.[lineIndex];
+        if (!line) return;
+
+        // Seek to line start
+        seekBothTracks(
+            line.start,
+            beatPlayerRef.current!,
+            vocalPlayerRef.current
+        );
+
+        // Update current line immediately
+        setCurrentLineIndex(lineIndex);
+        setCurrentTime(line.start);
+
+        // Re-enable auto-scroll
+        setAutoScrollEnabled(true);
+    }, [localSyncedLines, syncedLines, duration]);
+
+    // Cleanup timeouts on unmount
     useEffect(() => {
         return () => {
             if (scrollTimeoutRef.current) {
                 clearTimeout(scrollTimeoutRef.current);
+            }
+            if (modalCollapseTimeoutRef.current) {
+                clearTimeout(modalCollapseTimeoutRef.current);
             }
         };
     }, []);
@@ -509,72 +580,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
 
     // Editing Handlers
     const handleEditToggle = () => {
-        if (isEditing) {
-            setIsEditing(false);
-            setEditingLineIndex(null);
-            setAutoScrollEnabled(true);
-        } else {
-            setIsEditing(true);
-            // If using props data, copy to local state to enable editing
-            if (!localSyncedLines && syncedLines) {
-                setLocalSyncedLines(syncedLines);
-                setLocalSyncedWords(syncedWords || []);
-            }
-            setAutoScrollEnabled(false);
-            setIsPlaying(false); // Pause when starting to edit
-            if (beatPlayerRef.current) beatPlayerRef.current.pause();
-            if (vocalPlayerRef.current) vocalPlayerRef.current.pause();
-        }
-    };
-
-    const startEditingLine = (index: number, text: string, e: React.MouseEvent) => {
-        if (!isEditing) return;
-        e.stopPropagation();
-        setEditingLineIndex(index);
-        setEditText(text);
-    };
-
-    const saveLineEdit = () => {
-        if (editingLineIndex === null || !localSyncedLines) return;
-
-        const index = editingLineIndex;
-        const newText = editText.trim();
-        if (!newText) {
-            setEditingLineIndex(null);
-            return;
-        }
-
-        const currentLine = localSyncedLines[index];
-
-        // 1. Update Line Text
-        const updatedLines = [...localSyncedLines];
-        updatedLines[index] = { ...currentLine, text: newText };
-        setLocalSyncedLines(updatedLines);
-
-        // 2. Redistribute Words (Time-Lock)
-        // If we have local words, we update them. If not, we just update the line text.
-        if (localSyncedWords) {
-            const start = currentLine.start;
-            const end = currentLine.end;
-            const duration = end - start;
-            const newWordsList = newText.split(/\s+/);
-            const timePerWord = duration / Math.max(1, newWordsList.length);
-
-            const newTimedWords = newWordsList.map((word, i) => ({
-                word,
-                start: start + (i * timePerWord),
-                end: start + ((i + 1) * timePerWord)
-            }));
-
-            // Remove old words strictly within this line's range
-            const updatedWords = localSyncedWords.filter(w => !(w.start >= start && w.end - 0.001 <= end));
-            // Add new words and resort
-            const finalWords = [...updatedWords, ...newTimedWords].sort((a, b) => a.start - b.start);
-
-            setLocalSyncedWords(finalWords);
-        }
-
-        setEditingLineIndex(null);
+        // Edit feature removed for Apple Music style
     };
 
     // Helper to format time
@@ -637,95 +643,39 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                         {songTitle}
                     </h1>
                 </div>
-                <div className="w-10">
-                    {/* Show Edit button if we have synced lyrics */}
-                    {((localSyncedLines && localSyncedLines.length > 0) || (syncedLines && syncedLines.length > 0)) && !isTranscribing && (
-                        <button
-                            onClick={handleEditToggle}
-                            className={`p-2 transition-colors ${isEditing ? 'text-pink-500' : 'text-gray-400 hover:text-white'}`}
-                        >
-                            {isEditing ? <Check size={24} /> : <Edit2 size={24} />}
-                        </button>
-                    )}
-                </div>
+                <div className="w-10" />
             </div>
 
             {/* Lyrics Area (Main Page Content) */}
             <div
                 ref={lyricsContainerRef}
                 className="flex-grow overflow-y-auto px-8 pt-28 pb-40 flex flex-col items-center justify-center space-y-8 text-center lyriq-player-view"
-                style={{ scrollSnapType: 'y mandatory' }}
                 onScroll={handleUserScroll}
             >
                 {isTranscribing ? (
                     <div className="flex flex-col items-center justify-center space-y-4 animate-pulse">
-                        <div className="w-8 h-8 border-4 border-pink-500 border-t-transparent rounded-full animate-spin" />
+                        <div className="w-8 h-8 border-4 border-white/20 border-t-white rounded-full animate-spin" />
                         <p className="text-zinc-400 font-medium">Transcribing your flow...</p>
                     </div>
                 ) : (localSyncedLines && localSyncedLines.length > 0) || (syncedLines && syncedLines.length > 0) ? (
-                    /* Synced Lyrics Mode - with word-level highlighting */
+                    /* Synced Lyrics Mode - Apple Music Style */
                     (localSyncedLines || syncedLines)!.map((line, i) => (
                         <p
                             key={i}
                             ref={el => { lineElementsRef.current[i] = el; }}
-                            onClick={(e) => startEditingLine(i, line.text, e)}
-                            className={`lyriq-line text-3xl font-extrabold transition-all duration-700 cursor-default p-4 rounded-xl 
-                                ${i === currentLineIndex ? 'text-white scale-110 bg-white/5 shadow-2xl shadow-pink-500/10 blur-none highlighted-line' : 'text-zinc-600 scale-95 blur-[1px] opacity-50 hover:opacity-80 hover:blur-none transition-opacity'}
-                                ${isEditing ? 'hover:bg-zinc-800 cursor-text border border-dashed border-zinc-700' : ''}`}
-                            style={{ scrollSnapAlign: 'center', minHeight: '60px' }}
+                            onClick={() => handleLineClick(i)}
+                            className={`lyriq-line text-3xl transition-all duration-500 p-4 rounded-xl cursor-pointer
+                                ${i === currentLineIndex
+                                    ? 'text-white scale-105 opacity-100 blur-0 font-extrabold'
+                                    : 'text-zinc-500 scale-100 opacity-50 blur-[0.5px] font-semibold hover:opacity-80'}`}
+                            style={{ minHeight: '60px' }}
                             data-start={line.start}
                             data-end={line.end}
                         >
-                            {editingLineIndex === i ? (
-                                <input
-                                    autoFocus
-                                    className="bg-transparent text-center w-full outline-none text-pink-500 selection:bg-pink-500/30"
-                                    value={editText}
-                                    onChange={(e) => setEditText(e.target.value)}
-                                    onBlur={saveLineEdit}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter') saveLineEdit();
-                                    }}
-                                    onClick={(e) => e.stopPropagation()}
-                                />
-                            ) : (
-                                /* Render words with individual data attributes for karaoke effect */
-                                (localSyncedWords || syncedWords) ? (() => {
-                                    // Filter syncedWords to only words within this line's time range
-                                    const wordsSource = localSyncedWords || syncedWords;
-                                    const lineWords = wordsSource!.filter(w =>
-                                        w.start >= line.start && w.end <= line.end
-                                    );
-                                    return lineWords.map((timedWord, wordIdx) => {
-                                        const isHighlighted = currentTime >= timedWord.start;
-                                        return (
-                                            <span
-                                                key={wordIdx}
-                                                className={`lyriq-word ${isHighlighted ? 'highlighted-word' : ''}`}
-                                                data-start={timedWord.start}
-                                                data-end={timedWord.end}
-                                            >
-                                                {timedWord.word}{' '}
-                                            </span>
-                                        );
-                                    });
-                                })() : (
-                                    line.text
-                                )
-                            )}
-                        </p>
-                    ))
-                ) : lyricsText.length > 0 ? (
-                    /* Regular Lyrics Mode - no sync */
-                    lyricsText.map((line, i) => (
-                        <p
-                            key={i}
-                            ref={el => { lineElementsRef.current[i] = el; }}
-                            className={`lyriq-line text-3xl font-extrabold transition-all duration-500 cursor-default p-2 rounded-lg 
-                                ${i === currentLineIndex ? 'text-white scale-105 bg-pink-500/10 highlighted-line' : 'text-zinc-600'}`}
-                            style={{ scrollSnapAlign: 'center', minHeight: '50px' }}
-                        >
-                            {line}
+                            {/* Render words with individual data attributes for karaoke effect */}
+                            {/* Apple Music Style - Line Highlighting Only */}
+                            {line.text}
+
                         </p>
                     ))
                 ) : (
