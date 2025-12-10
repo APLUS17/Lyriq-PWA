@@ -649,7 +649,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
             {/* Lyrics Area (Main Page Content) */}
             <div
                 ref={lyricsContainerRef}
-                className="flex-grow overflow-y-auto px-8 pt-28 pb-40 flex flex-col items-center justify-center space-y-8 text-center lyriq-player-view"
+                className="flex-grow overflow-y-auto px-8 pt-[50vh] pb-[50vh] flex flex-col items-center space-y-6 text-center lyriq-player-view"
                 onScroll={handleUserScroll}
             >
                 {isTranscribing ? (
