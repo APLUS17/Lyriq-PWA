@@ -649,7 +649,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
             {/* Lyrics Area (Main Page Content) */}
             <div
                 ref={lyricsContainerRef}
-                className="flex-grow overflow-y-auto px-8 pt-[50vh] pb-[50vh] flex flex-col items-center space-y-6 text-center lyriq-player-view"
+                className="flex-grow overflow-y-auto px-4 md:px-8 pt-24 md:pt-[50vh] pb-48 md:pb-[50vh] flex flex-col items-center space-y-6 text-center lyriq-player-view"
                 onScroll={handleUserScroll}
             >
                 {isTranscribing ? (
@@ -664,7 +664,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                             key={i}
                             ref={el => { lineElementsRef.current[i] = el; }}
                             onClick={() => handleLineClick(i)}
-                            className={`lyriq-line text-3xl transition-all duration-500 p-4 rounded-xl cursor-pointer
+                            className={`lyriq-line text-xl md:text-3xl transition-all duration-500 p-3 md:p-4 rounded-xl cursor-pointer
                                 ${i === currentLineIndex
                                     ? 'text-white scale-105 opacity-100 blur-0 font-extrabold'
                                     : 'text-zinc-500 scale-100 opacity-50 blur-[0.5px] font-semibold hover:opacity-80'}`}
