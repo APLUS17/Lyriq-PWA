@@ -106,3 +106,46 @@ export async function decodeAudioFromUrl(audioUrl: string, audioContext: AudioCo
     const arrayBuffer = await response.arrayBuffer();
     return await audioContext.decodeAudioData(arrayBuffer);
 }
+
+/**
+ * Draws a live dynamic waveform from AnalyserNode data.
+ * Optimized for real-time visualization during recording.
+ */
+export function drawLiveWaveform(
+    ctx: CanvasRenderingContext2D,
+    dataArray: Uint8Array,
+    bufferLength: number,
+    color: string = '#ec4899' // pink-500
+): void {
+    if (!ctx) return;
+
+    const canvas = ctx.canvas;
+    const width = canvas.width;
+    const height = canvas.height;
+    const centerY = height / 2;
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+
+    const sliceWidth = width * 1.0 / bufferLength;
+    let x = 0;
+
+    for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 128.0; // Normalize 0-255 to 0-2 (1 is center)
+        const y = v * height / 2; // Map to canvas height
+
+        // Draw centered
+        if (i === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
+
+        x += sliceWidth;
+    }
+
+    ctx.lineTo(canvas.width, canvas.height / 2);
+    ctx.stroke();
+}

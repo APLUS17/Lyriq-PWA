@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Play, Pause, Mic, Music, ChevronDown, Rewind, FastForward, Volume2, Edit2, Check } from 'lucide-react';
+import { Play, Pause, Mic, Music, ChevronDown, Rewind, FastForward, Volume2, Edit2, Check, Sliders } from 'lucide-react';
+import { createVocalEffectChain, setEffectLevel, EffectChain } from '../services/audioEffectsService';
 import { motion, PanInfo } from 'framer-motion';
 import { TimedWord, TimedLine } from '../types';
 import { transcribeAndGroupAudio } from '../services/lyriqTranscriptionService';
-import { drawCenteredWaveform, decodeAudioFromUrl } from '../services/canvasWaveformService';
+import { drawCenteredWaveform, decodeAudioFromUrl, drawLiveWaveform } from '../services/canvasWaveformService';
+
 import { playBothTracks, pauseBothTracks, seekBothTracks } from '../services/audioSyncService';
 import { getTimeFromEvent } from '../services/scrubbingService';
 
@@ -28,6 +30,13 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
     const [isRecording, setIsRecording] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
+
+    // Audio FX State
+    const [effectChain, setEffectChain] = useState<EffectChain | null>(null);
+    const [fxSpace, setFxSpace] = useState(0); // Reverb (0-100)
+    const [fxWidth, setFxWidth] = useState(0); // Chorus (0-100)
+    const [fxGrit, setFxGrit] = useState(0);   // Distortion (0-100)
+    const [showFxPanel, setShowFxPanel] = useState(false);
 
     // Recording state
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -59,6 +68,8 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
     const beatWaveformCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const vocalWaveformCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const waveformAnimationRef = useRef<number | null>(null);
+    const analyserNodeRef = useRef<AnalyserNode | null>(null);
+    const visualizerAnimationRef = useRef<number | null>(null);
 
     // Waveform state
     const [beatAudioBuffer, setBeatAudioBuffer] = useState<AudioBuffer | null>(null);
@@ -155,6 +166,22 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
             }
         };
     }, [beatUrl, initAudioContext]);
+
+    // Update FX Levels in Real-time
+    useEffect(() => {
+        if (!effectChain) return;
+        setEffectLevel(effectChain.reverbGain, fxSpace);
+    }, [fxSpace, effectChain]);
+
+    useEffect(() => {
+        if (!effectChain) return;
+        setEffectLevel(effectChain.widthGain, fxWidth);
+    }, [fxWidth, effectChain]);
+
+    useEffect(() => {
+        if (!effectChain) return;
+        setEffectLevel(effectChain.gritGain, fxGrit);
+    }, [fxGrit, effectChain]);
 
     // Auto-scroll and highlighting effect
     // Line-by-Line Sync Logic (Apple Music Style)
@@ -380,12 +407,37 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                     } catch (e) { /* console.warn("Beat source already connected", e); */ }
                 }
 
-                // Connect vocal track to audio context if exists
+                // Connect                // 2. Connect Vocal Track WITH EFFECTS CHAIN
                 if (vocalPlayerRef.current && vocalUrl && !vocalSourceNodeRef.current) {
                     try {
                         vocalSourceNodeRef.current = ctx.createMediaElementSource(vocalPlayerRef.current);
-                        vocalSourceNodeRef.current.connect(ctx.destination);
-                    } catch (e) { /* console.warn("Vocal source already connected", e); */ }
+
+                        // Create Effect Chain if not exists
+                        let chain = effectChain;
+                        if (!chain) {
+                            chain = createVocalEffectChain(ctx);
+                            setEffectChain(chain);
+                        }
+
+                        // Source -> Effect Input
+                        vocalSourceNodeRef.current.disconnect(); // Disconnect from prev destination
+                        vocalSourceNodeRef.current.connect(chain!.inputNode);
+
+                        // Effect Output -> Speakers
+                        chain!.outputNode.connect(ctx.destination);
+
+                        // Apply current levels
+                        setEffectLevel(chain!.reverbGain, fxSpace);
+                        setEffectLevel(chain!.widthGain, fxWidth);
+                        setEffectLevel(chain!.gritGain, fxGrit);
+
+                    } catch (e) {
+                        console.error("FX Setup Error", e);
+                        // Fallback to direct connection if FX fails
+                        if (vocalSourceNodeRef.current) {
+                            try { vocalSourceNodeRef.current.connect(ctx.destination); } catch (err) { }
+                        }
+                    }
                 }
 
                 // Auto-rewind if at end
@@ -490,6 +542,15 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
                 mediaRecorderRef.current.stop();
             }
+            // Stop Visualizer
+            if (visualizerAnimationRef.current) {
+                cancelAnimationFrame(visualizerAnimationRef.current);
+                visualizerAnimationRef.current = null;
+            }
+            // Analyser node cleanup is handled by GC as simple JS object, 
+            // but we might want to check if we need to disconnect source. 
+            // Since source was local, it will be GC'd when stream tracks stop.
+            analyserNodeRef.current = null;
         } else {
             // Start recording
             try {
@@ -573,6 +634,44 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
 
                 mediaRecorderRef.current.start();
                 setIsRecording(true);
+
+                // Setup Live Visualizer
+                const audioCtx = initAudioContext();
+                const source = audioCtx.createMediaStreamSource(stream);
+                const analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 2048;
+                source.connect(analyser);
+                analyserNodeRef.current = analyser;
+
+                const drawVisualizer = () => {
+                    if (!vocalWaveformCanvasRef.current || !analyserNodeRef.current) return;
+                    const canvas = vocalWaveformCanvasRef.current;
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) return;
+
+                    // Ensure canvas size matches display size
+                    const dpr = window.devicePixelRatio || 1;
+                    const rect = canvas.getBoundingClientRect();
+                    const width = rect.width * dpr;
+                    const height = rect.height * dpr;
+
+                    if (canvas.width !== width || canvas.height !== height) {
+                        canvas.width = width;
+                        canvas.height = height;
+                        ctx.scale(dpr, dpr);
+                    }
+
+                    const bufferLength = analyserNodeRef.current.frequencyBinCount;
+                    const dataArray = new Uint8Array(bufferLength);
+                    analyserNodeRef.current.getByteTimeDomainData(dataArray);
+
+                    // Use context wrapper to handle scaling if needed, or pass raw canvas dimensions
+                    // drawLiveWaveform handles clearRect using passed width/height
+                    drawLiveWaveform(ctx, dataArray, bufferLength);
+
+                    visualizerAnimationRef.current = requestAnimationFrame(drawVisualizer);
+                };
+                drawVisualizer();
 
                 // If beat is playing, keep it playing during recording
                 // Otherwise, start playing the beat for recording
@@ -868,10 +967,71 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                                     )}
                                 </motion.div>
                             )}
+
+                            {/* FX Panel Overlay (Room, Width, Grit) */}
+                            {showFxPanel && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -10 }}
+                                    className="absolute top-0 left-0 right-0 ml-10 h-32 bg-zinc-900/95 backdrop-blur-sm rounded-lg border border-cyan-500/20 p-4 flex flex-col justify-center gap-2 z-20"
+                                >
+                                    {/* Room Reverb Slider */}
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-[10px] uppercase font-bold text-cyan-500 w-12 tracking-wider">Room</span>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={fxSpace}
+                                            onChange={(e) => setFxSpace(Number(e.target.value))}
+                                            className="flex-grow h-1.5 bg-zinc-700 rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-cyan-400"
+                                        />
+                                        <span className="text-xs text-zinc-400 w-8 text-right">{fxSpace}%</span>
+                                    </div>
+
+                                    {/* Width Slider */}
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-[10px] uppercase font-bold text-violet-500 w-12 tracking-wider">Width</span>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={fxWidth}
+                                            onChange={(e) => setFxWidth(Number(e.target.value))}
+                                            className="flex-grow h-1.5 bg-zinc-700 rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-violet-400"
+                                        />
+                                        <span className="text-xs text-zinc-400 w-8 text-right">{fxWidth}%</span>
+                                    </div>
+
+                                    {/* Grit Slider */}
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-[10px] uppercase font-bold text-amber-500 w-12 tracking-wider">Grit</span>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={fxGrit}
+                                            onChange={(e) => setFxGrit(Number(e.target.value))}
+                                            className="flex-grow h-1.5 bg-zinc-700 rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-amber-400"
+                                        />
+                                        <span className="text-xs text-zinc-400 w-8 text-right">{fxGrit}%</span>
+                                    </div>
+                                </motion.div>
+                            )}
                         </div>
 
                         {/* Floating Action Buttons (Centered below waveform) */}
                         <div className="flex items-center justify-center gap-8 mt-6">
+
+                            {/* FX Toggle Button */}
+                            <button
+                                onClick={() => setShowFxPanel(!showFxPanel)}
+                                className={`p-2.5 transition-colors rounded-full w-11 h-11 flex items-center justify-center ${showFxPanel ? 'text-cyan-400 bg-cyan-400/10' : 'text-zinc-400 hover:text-white'}`}
+                                title="Toggle Effects"
+                            >
+                                <Sliders size={20} />
+                            </button>
 
                             {/* Volume Button */}
                             <button
