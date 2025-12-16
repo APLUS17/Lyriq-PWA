@@ -63,7 +63,11 @@ export function groupWordsIntoLines(words: TimedWord[]): TimedLine[] {
  * @returns Promise resolving to array of timed words
  */
 export async function transcribeAudioToTimedWords(audioBlob: Blob): Promise<TimedWord[]> {
-    const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_TRANSCRIPTION_API_KEY as string });
+    const apiKey = import.meta.env.VITE_TRANSCRIPTION_API_KEY;
+    if (!apiKey) {
+        throw new Error("Transcription API Key is missing. Please check your .env file and restart the development server.");
+    }
+    const ai = new GoogleGenAI({ apiKey });
 
     // Convert blob to base64
     const arrayBuffer = await audioBlob.arrayBuffer();
