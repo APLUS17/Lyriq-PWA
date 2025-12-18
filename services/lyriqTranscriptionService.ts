@@ -94,7 +94,7 @@ Follow these rules strictly:
 5.  Do NOT include any additional commentary, text, or formatting outside of the final JSON array. The response must be only the JSON.`;
 
     const response = await ai.models.generateContent({
-        model: 'gemini-3-flash',
+        model: 'gemini-3-flash-preview',
         contents: [
             {
                 role: 'user',

@@ -637,7 +637,7 @@ const App: React.FC = () => {
             const prompt = `Given the lyric line "${context}", provide a list of up to 10 contextual rhyming words for "${word}". The rhymes should fit the mood and meaning of the line. Only return single words.`;
 
             const response = await ai.models.generateContent({
-                model: 'gemini-3-flash',
+                model: 'gemini-3-flash-preview',
                 contents: prompt,
                 config: {
                     responseMimeType: 'application/json',
