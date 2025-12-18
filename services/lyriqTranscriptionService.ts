@@ -69,11 +69,17 @@ export async function transcribeAudioToTimedWords(audioBlob: Blob): Promise<Time
     }
     const ai = new GoogleGenAI({ apiKey });
 
-    // Convert blob to base64
-    const arrayBuffer = await audioBlob.arrayBuffer();
-    const base64Audio = btoa(
-        new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-    );
+    // Convert blob to base64 efficiently
+    const base64Audio = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const result = reader.result as string;
+            const base64 = result.split(',')[1];
+            resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(audioBlob);
+    });
 
     const prompt = `You are an expert Speech-to-Text processor specializing in musical vocals. Your task is to analyze the provided audio and produce a highly accurate, word-for-word transcription with precise timing.
 
@@ -88,7 +94,7 @@ Follow these rules strictly:
 5.  Do NOT include any additional commentary, text, or formatting outside of the final JSON array. The response must be only the JSON.`;
 
     const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3-flash',
         contents: [
             {
                 role: 'user',

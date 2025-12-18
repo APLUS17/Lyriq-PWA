@@ -633,11 +633,11 @@ const App: React.FC = () => {
 
     const fetchRhymes = async (word: string, context: string) => {
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_TRANSCRIPTION_API_KEY });
             const prompt = `Given the lyric line "${context}", provide a list of up to 10 contextual rhyming words for "${word}". The rhymes should fit the mood and meaning of the line. Only return single words.`;
 
             const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
+                model: 'gemini-3-flash',
                 contents: prompt,
                 config: {
                     responseMimeType: 'application/json',

@@ -1,6 +1,6 @@
 /**
  * Audio Effects Service
- * Handles studio-quality vocal effects: Room Reverb, Width (Doubler), and Grit (Distortion).
+ * Handles studio-quality vocal effects: Room Reverb, Width (Doubler), and Delay.
  */
 
 export interface EffectChain {
@@ -8,7 +8,8 @@ export interface EffectChain {
     outputNode: GainNode;
     reverbGain: GainNode;
     widthGain: GainNode;
-    gritGain: GainNode;
+    delayGain: GainNode;
+    delayNode: DelayNode;
 }
 
 /**
@@ -37,46 +38,32 @@ function createRoomImpulseResponse(context: AudioContext): AudioBuffer {
 }
 
 /**
- * Creates a distortion curve for the "Grit" effect.
- * Uses a soft saturation function to add warmth/harmonics.
- */
-function makeDistortionCurve(amount: number = 50): Float32Array {
-    const n_samples = 44100;
-    const curve = new Float32Array(n_samples);
-    const deg = Math.PI / 180;
-
-    for (let i = 0; i < n_samples; ++i) {
-        const x = i * 2 / n_samples - 1;
-        // Soft clipping formula
-        curve[i] = (3 + amount) * x * 20 * deg / (Math.PI + amount * Math.abs(x));
-    }
-    return curve;
-}
-
-/**
  * Creates the "Studio Rack" effect chain.
- * Source -> [Distortion] -> [Chorus] -> [Reverb] -> Destination
+ * Source -> [Delay] -> [Chorus] -> [Reverb] -> Destination
  * Uses parallel wet/dry chains for each effect.
  */
 export function createVocalEffectChain(context: AudioContext): EffectChain {
     const inputNode = context.createGain(); // Master Input
     const outputNode = context.createGain(); // Master Output
 
-    // 1. Grit (Distortion) Stage
-    const gritNode = context.createWaveShaper();
-    gritNode.curve = makeDistortionCurve(400); // Moderate drive
-    gritNode.oversample = '4x';
-    const gritGain = context.createGain();
-    const gritDry = context.createGain();
+    // 1. Delay Stage (Replacing Distortion)
+    const delayNode = context.createDelay(2.0); // 2 second max delay
+    delayNode.delayTime.value = 0.4; // 400ms default
+    const delayFeedback = context.createGain();
+    delayFeedback.gain.value = 0.4; // 40% feedback loop
+    const delayGain = context.createGain(); // Wet level
+    const delayDry = context.createGain(); // Dry level
 
-    // Connect Distortion
-    inputNode.connect(gritNode);
-    gritNode.connect(gritGain);
-    inputNode.connect(gritDry); // Dry signal bypass
+    // Connect Delay with Feedback
+    inputNode.connect(delayDry);
+    inputNode.connect(delayNode);
+    delayNode.connect(delayGain);
+    delayNode.connect(delayFeedback);
+    delayFeedback.connect(delayNode); // Feedback loop
 
-    const gritMerge = context.createGain();
-    gritGain.connect(gritMerge);
-    gritDry.connect(gritMerge);
+    const delayMerge = context.createGain();
+    delayGain.connect(delayMerge);
+    delayDry.connect(delayMerge);
 
     // 2. Width (Chorus/Doubler) Stage
     // We use a short delay and pan it to create width
@@ -93,10 +80,10 @@ export function createVocalEffectChain(context: AudioContext): EffectChain {
     const widthDry = context.createGain();
 
     // Connect Width
-    gritMerge.connect(delayNodeLeft);
-    gritMerge.connect(delayNodeRight);
+    delayMerge.connect(delayNodeLeft);
+    delayMerge.connect(delayNodeRight);
     merger.connect(widthGain);
-    gritMerge.connect(widthDry);
+    delayMerge.connect(widthDry);
 
     const widthMerge = context.createGain();
     widthGain.connect(widthMerge);
@@ -118,8 +105,8 @@ export function createVocalEffectChain(context: AudioContext): EffectChain {
     reverbDry.connect(outputNode);
 
     // Initialize Levels (Defaults)
-    gritGain.gain.value = 0;
-    gritDry.gain.value = 1;
+    delayGain.gain.value = 0;
+    delayDry.gain.value = 1;
 
     widthGain.gain.value = 0;
     widthDry.gain.value = 1;
@@ -127,20 +114,13 @@ export function createVocalEffectChain(context: AudioContext): EffectChain {
     reverbGain.gain.value = 0;
     reverbDry.gain.value = 1;
 
-    // Helper to update dry/wet mix for a stage
-    // We attach a custom function to the gain node for easy access? 
-    // No, we'll just return the gain nodes and let the UI drive them.
-    // Ideally, increasing Wet should decrease Dry to maintain volume, 
-    // but for simple "Send" style effects, keeping Dry at 100% is often preferred for vocals.
-    // Let's keep Dry fixed at 1.0 for now (Sends) unless user wants "Inserts".
-    // For Distortion, Insert style is better. For Reverb/Delay, Send style is standard.
-
     return {
         inputNode,
         outputNode,
         reverbGain,
         widthGain,
-        gritGain
+        delayGain,
+        delayNode
     };
 }
 

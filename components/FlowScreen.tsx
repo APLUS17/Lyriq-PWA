@@ -35,7 +35,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
     const [effectChain, setEffectChain] = useState<EffectChain | null>(null);
     const [fxSpace, setFxSpace] = useState(0); // Reverb (0-100)
     const [fxWidth, setFxWidth] = useState(0); // Chorus (0-100)
-    const [fxGrit, setFxGrit] = useState(0);   // Distortion (0-100)
+    const [fxDelay, setFxDelay] = useState(0); // Delay (0-100)
     const [showFxPanel, setShowFxPanel] = useState(false);
 
     // Recording state
@@ -180,8 +180,8 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
 
     useEffect(() => {
         if (!effectChain) return;
-        setEffectLevel(effectChain.gritGain, fxGrit);
-    }, [fxGrit, effectChain]);
+        setEffectLevel(effectChain.delayGain, fxDelay);
+    }, [fxDelay, effectChain]);
 
     // Auto-scroll and highlighting effect
     // Line-by-Line Sync Logic (Apple Music Style)
@@ -429,7 +429,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                         // Apply current levels
                         setEffectLevel(chain!.reverbGain, fxSpace);
                         setEffectLevel(chain!.widthGain, fxWidth);
-                        setEffectLevel(chain!.gritGain, fxGrit);
+                        setEffectLevel(chain!.delayGain, fxDelay);
 
                     } catch (e) {
                         console.error("FX Setup Error", e);
@@ -624,9 +624,11 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                         setLocalSyncedWords(words);
                         setLocalSyncedLines(lines);
                         console.log('Transcription complete:', words, lines);
-                    } catch (error) {
+                    } catch (error: any) {
                         console.error('Transcription failed:', error);
-                        alert('Transcription failed. Please try again.');
+                        const errorMessage = error?.message || 'Unknown error';
+                        const stack = error?.stack || 'No stack trace';
+                        alert(`Transcription failed.\n\nError: ${errorMessage}\n\nStack: ${stack.substring(0, 200)}...`);
                     } finally {
                         setIsTranscribing(false);
                     }
@@ -968,7 +970,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                                 </motion.div>
                             )}
 
-                            {/* FX Panel Overlay (Room, Width, Grit) */}
+                            {/* FX Panel Overlay (Room, Width, Delay) */}
                             {showFxPanel && (
                                 <motion.div
                                     initial={{ opacity: 0, y: -10 }}
@@ -1004,18 +1006,18 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                                         <span className="text-xs text-zinc-400 w-8 text-right">{fxWidth}%</span>
                                     </div>
 
-                                    {/* Grit Slider */}
+                                    {/* Delay Slider */}
                                     <div className="flex items-center gap-3">
-                                        <span className="text-[10px] uppercase font-bold text-amber-500 w-12 tracking-wider">Grit</span>
+                                        <span className="text-[10px] uppercase font-bold text-blue-500 w-12 tracking-wider">Delay</span>
                                         <input
                                             type="range"
                                             min="0"
                                             max="100"
-                                            value={fxGrit}
-                                            onChange={(e) => setFxGrit(Number(e.target.value))}
-                                            className="flex-grow h-1.5 bg-zinc-700 rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-amber-400"
+                                            value={fxDelay}
+                                            onChange={(e) => setFxDelay(Number(e.target.value))}
+                                            className="flex-grow h-1.5 bg-zinc-700 rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-400"
                                         />
-                                        <span className="text-xs text-zinc-400 w-8 text-right">{fxGrit}%</span>
+                                        <span className="text-xs text-zinc-400 w-8 text-right">{fxDelay}%</span>
                                     </div>
                                 </motion.div>
                             )}
