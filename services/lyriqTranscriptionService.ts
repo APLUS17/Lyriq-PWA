@@ -81,17 +81,9 @@ export async function transcribeAudioToTimedWords(audioBlob: Blob): Promise<Time
         reader.readAsDataURL(audioBlob);
     });
 
-    const prompt = `You are an expert Speech-to-Text processor specializing in musical vocals. Your task is to analyze the provided audio and produce a highly accurate, word-for-word transcription with precise timing.
-
-Follow these rules strictly:
-1.  Transcribe the sung vocals in the audio.
-2.  Format the entire output as a single, clean JSON array of objects.
-3.  Each object in the array represents a single word.
-4.  Each object MUST contain three keys:
-    - "word": The transcribed word as a string.
-    - "start": The start time of the word in seconds (float).
-    - "end": The end time of the word in seconds (float).
-5.  Do NOT include any additional commentary, text, or formatting outside of the final JSON array. The response must be only the JSON.`;
+    const prompt = `Transcribe these lyrics with word-level timestamps. 
+Return ONLY a JSON array of objects: [{"word": "string", "start": float, "end": float}, ...]. 
+No commentary. No markdown formatting. Just raw JSON array.`;
 
     const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',

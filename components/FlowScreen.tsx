@@ -560,7 +560,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                         noiseSuppression: true,
                         autoGainControl: true,
                         channelCount: 1,
-                        sampleRate: 48000
+                        sampleRate: 24000
                     }
                 });
 
