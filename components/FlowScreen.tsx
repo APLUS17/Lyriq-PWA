@@ -642,8 +642,26 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                 const source = audioCtx.createMediaStreamSource(stream);
                 const analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 2048;
+
+                // --- Live FX Monitoring Setup ---
+                let chain = effectChain;
+                if (!chain) {
+                    chain = createVocalEffectChain(audioCtx);
+                    setEffectChain(chain);
+                }
+
+                // Mic -> Analyser (for waveform)
                 source.connect(analyser);
                 analyserNodeRef.current = analyser;
+
+                // Mic -> FX Chain -> Speakers (Monitoring)
+                source.connect(chain.inputNode);
+                chain.outputNode.connect(audioCtx.destination);
+
+                // Sync current UI levels to the new chain
+                setEffectLevel(chain.reverbGain, fxSpace);
+                setEffectLevel(chain.widthGain, fxWidth);
+                setEffectLevel(chain.delayGain, fxDelay);
 
                 const drawVisualizer = () => {
                     if (!vocalWaveformCanvasRef.current || !analyserNodeRef.current) return;

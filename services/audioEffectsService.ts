@@ -50,7 +50,7 @@ export function createVocalEffectChain(context: AudioContext): EffectChain {
     const delayNode = context.createDelay(2.0); // 2 second max delay
     delayNode.delayTime.value = 0.4; // 400ms default
     const delayFeedback = context.createGain();
-    delayFeedback.gain.value = 0.4; // 40% feedback loop
+    delayFeedback.gain.value = 0.5; // 50% feedback loop (more noticeable)
     const delayGain = context.createGain(); // Wet level
     const delayDry = context.createGain(); // Dry level
 
