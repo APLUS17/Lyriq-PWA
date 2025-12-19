@@ -8,6 +8,42 @@ import { TimedWord, TimedLine } from '../types';
  */
 
 const MAX_PAUSE_BETWEEN_WORDS = 0.5; // seconds - pause threshold for line breaks
+const TRANSCRIPTION_MODEL = 'gemini-3-flash-preview'; // AI model for transcription
+const SUPPORTED_AUDIO_FORMATS = [
+    'audio/webm',
+    'audio/webm;codecs=opus',
+    'audio/mp4',
+    'audio/mpeg',
+    'audio/wav',
+    'audio/ogg'
+];
+
+/**
+ * Type guard to validate TimedWord objects at runtime
+ */
+function isTimedWord(obj: any): obj is TimedWord {
+    return (
+        typeof obj === 'object' &&
+        obj !== null &&
+        typeof obj.word === 'string' &&
+        typeof obj.start === 'number' &&
+        typeof obj.end === 'number' &&
+        !isNaN(obj.start) &&
+        !isNaN(obj.end) &&
+        obj.start >= 0 &&
+        obj.end >= obj.start
+    );
+}
+
+/**
+ * Validates an array of timed words
+ */
+function validateTimedWords(data: any): data is TimedWord[] {
+    if (!Array.isArray(data)) {
+        return false;
+    }
+    return data.every(isTimedWord);
+}
 
 /**
  * Groups individual timed words into lines based on pauses between words.
@@ -29,7 +65,7 @@ export function groupWordsIntoLines(words: TimedWord[]): TimedLine[] {
             const previousWord = currentLine[currentLine.length - 1];
             const pause = word.start - previousWord.end;
 
-            if (pause < MAX_PAUSE_BETWEEN_WORDS) {
+            if (pause <= MAX_PAUSE_BETWEEN_WORDS) {
                 currentLine.push(word);
             } else {
                 // Push completed line
@@ -58,15 +94,25 @@ export function groupWordsIntoLines(words: TimedWord[]): TimedLine[] {
 /**
  * Transcribes audio to timed words using Gemini AI.
  * Returns word-level timestamps for karaoke-style sync.
- * 
+ *
  * @param audioBlob - The recorded audio as a Blob
  * @returns Promise resolving to array of timed words
+ * @throws Error if API key is missing, audio format is unsupported, or transcription fails
  */
 export async function transcribeAudioToTimedWords(audioBlob: Blob): Promise<TimedWord[]> {
+    // WARNING: API key is exposed in client-side bundle (VITE_ prefix)
+    // TODO: Move transcription to backend API endpoint for production security
     const apiKey = import.meta.env.VITE_TRANSCRIPTION_API_KEY;
     if (!apiKey) {
         throw new Error("Transcription API Key is missing. Please check your .env file and restart the development server.");
     }
+
+    // Validate audio format
+    const mimeType = audioBlob.type || 'audio/webm';
+    if (!SUPPORTED_AUDIO_FORMATS.some(format => mimeType.startsWith(format.split(';')[0]))) {
+        throw new Error(`Unsupported audio format: ${mimeType}. Supported formats: ${SUPPORTED_AUDIO_FORMATS.join(', ')}`);
+    }
+
     const ai = new GoogleGenAI({ apiKey });
 
     // Convert blob to base64 efficiently
@@ -86,7 +132,7 @@ Return ONLY a JSON array of objects: [{"word": "string", "start": float, "end": 
 No commentary. No markdown formatting. Just raw JSON array.`;
 
     const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: TRANSCRIPTION_MODEL,
         contents: [
             {
                 role: 'user',
@@ -94,7 +140,7 @@ No commentary. No markdown formatting. Just raw JSON array.`;
                     { text: prompt },
                     {
                         inlineData: {
-                            mimeType: audioBlob.type || 'audio/webm',
+                            mimeType,
                             data: base64Audio
                         }
                     }
@@ -120,11 +166,25 @@ No commentary. No markdown formatting. Just raw JSON array.`;
 
     const jsonText = response.text?.trim();
     if (!jsonText) {
-        throw new Error('No transcription response received');
+        throw new Error('No transcription response received from AI model');
     }
 
-    const timedWords: TimedWord[] = JSON.parse(jsonText);
-    return timedWords;
+    // Parse and validate the response
+    let parsedData: any;
+    try {
+        parsedData = JSON.parse(jsonText);
+    } catch (parseError) {
+        console.error('Failed to parse transcription response:', { jsonText, parseError });
+        throw new Error(`Invalid JSON response from transcription service: ${parseError instanceof Error ? parseError.message : 'Unknown parsing error'}`);
+    }
+
+    // Validate the structure matches our expected format
+    if (!validateTimedWords(parsedData)) {
+        console.error('Invalid transcription data structure:', parsedData);
+        throw new Error('Transcription response does not match expected format. Each word must have: word (string), start (number), end (number)');
+    }
+
+    return parsedData;
 }
 
 /**
@@ -144,8 +204,8 @@ export async function transcribeAndGroupAudio(audioBlob: Blob): Promise<{
 
 /**
  * Find the line index that contains the given time.
- * Uses binary search for efficiency with large lyric sets.
- * 
+ * Uses linear search to find the active line.
+ *
  * @param time - Current playback time in seconds
  * @param lines - Array of timed lines
  * @returns Index of the active line, or -1 if none found
@@ -153,22 +213,18 @@ export async function transcribeAndGroupAudio(audioBlob: Blob): Promise<{
 export function findLineIndexAtTime(time: number, lines: TimedLine[]): number {
     if (!lines || lines.length === 0) return -1;
 
-    for (let i = 0; i < lines.length; i++) {
-        if (time >= lines[i].start && time <= lines[i].end) {
+    // Search backwards for efficiency (usually searching near current position)
+    for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].start <= time) {
+            // If the line has an explicit end time and we passed it, skip
+            if (lines[i].end && time > lines[i].end) {
+                continue;
+            }
             return i;
         }
-        // If we're between lines, return the previous line
-        if (i > 0 && time > lines[i - 1].end && time < lines[i].start) {
-            return i - 1;
-        }
     }
 
-    // If past all lines, return last line
-    if (time > lines[lines.length - 1].end) {
-        return lines.length - 1;
-    }
-
-    return 0;
+    return -1;
 }
 
 /**

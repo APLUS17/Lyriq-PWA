@@ -3,7 +3,7 @@ import { Play, Pause, Mic, Music, ChevronDown, Rewind, FastForward, Volume2, Edi
 import { createVocalEffectChain, setEffectLevel, EffectChain } from '../services/audioEffectsService';
 import { motion, PanInfo } from 'framer-motion';
 import { TimedWord, TimedLine } from '../types';
-import { transcribeAndGroupAudio } from '../services/lyriqTranscriptionService';
+import { transcribeAndGroupAudio, findLineIndexAtTime } from '../services/lyriqTranscriptionService';
 import { drawCenteredWaveform, decodeAudioFromUrl, drawLiveWaveform } from '../services/canvasWaveformService';
 
 import { playBothTracks, pauseBothTracks, seekBothTracks } from '../services/audioSyncService';
@@ -185,22 +185,6 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
 
     // Auto-scroll and highlighting effect
     // Line-by-Line Sync Logic (Apple Music Style)
-    // Helper to find active line efficiently (backwards iteration)
-    const findLineIndexAtTime = (time: number, lines: TimedLine[]): number => {
-        if (!lines || lines.length === 0) return -1;
-        // Loop backwards to find the active line efficiently
-        for (let i = lines.length - 1; i >= 0; i--) {
-            if (lines[i].start <= time) {
-                // If the line has an explicit end time and we passed it, skip
-                if (lines[i].end && time > lines[i].end!) {
-                    continue;
-                }
-                return i;
-            }
-        }
-        return -1;
-    };
-
     const HIGHLIGHT_OFFSET = 0.15; // 0.15s lookahead
 
     // Auto-scroll and highlighting effect
