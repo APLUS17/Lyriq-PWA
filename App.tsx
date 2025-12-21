@@ -149,10 +149,8 @@ const App: React.FC = () => {
         if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 50) {
             if (diffX < 0) {
                 // Swipe Left (Right-to-Left) -> Forward
-                if (currentScreen === 'home') {
-                    setDirection(1);
-                    setCurrentScreen('editor');
-                } else if (currentScreen === 'editor') {
+                // Removed: home -> editor swipe navigation
+                if (currentScreen === 'editor') {
                     // Check for Right Edge Swipe -> Flow
                     if (globalTouchStart.current.x > window.innerWidth * 0.8) {
                         setDirection(1);
