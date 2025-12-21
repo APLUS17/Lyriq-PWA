@@ -55,26 +55,32 @@ const HomeScreen = React.forwardRef<HTMLDivElement, HomeScreenProps>(({ onNaviga
   const currentProjects = projects;
   const isEmpty = currentProjects.length === 0;
 
-  // Pull to search logic - only triggered from header area
-  const handleHeaderTouchStart = (e: React.TouchEvent) => {
+  // Pull to search logic - only triggered when pulling down from top of songs list
+  const handleListTouchStart = (e: React.TouchEvent) => {
     if (songListRef.current && songListRef.current.scrollTop === 0) {
       startYRef.current = e.touches[0].clientY;
       isPullingRef.current = true;
     }
   };
 
-  const handleHeaderTouchMove = (e: React.TouchEvent) => {
+  const handleListTouchMove = (e: React.TouchEvent) => {
     if (!isPullingRef.current || !songListRef.current) return;
 
     const currentY = e.touches[0].clientY;
     const diff = currentY - startYRef.current;
 
+    // Only allow pull down when at the top of the list
     if (diff > 0 && songListRef.current.scrollTop === 0) {
+      e.preventDefault(); // Prevent default scrolling behavior
       setPullOffset(Math.min(diff * 0.5, 100));
+    } else if (diff < 0) {
+      // User is trying to scroll up, cancel the pull gesture
+      isPullingRef.current = false;
+      setPullOffset(0);
     }
   };
 
-  const handleHeaderTouchEnd = () => {
+  const handleListTouchEnd = () => {
     if (pullOffset > 60) {
       setIsSearchOpen(true);
     }
@@ -136,18 +142,15 @@ const HomeScreen = React.forwardRef<HTMLDivElement, HomeScreenProps>(({ onNaviga
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.3 }}
-      className="min-h-[100dvh] bg-black text-white font-sans flex flex-col items-center relative overflow-hidden w-full"
+      className="h-[100dvh] bg-black text-white font-sans flex flex-col items-center relative overflow-hidden w-full"
       onClick={() => setContextMenu(null)}
     >
       <GlassBackground />
 
-      <div className="w-full flex flex-col h-screen z-10">
+      <div className="w-full flex flex-col h-full z-10">
         {/* Header - Fixed */}
         <div
           className="px-6 pt-12 pb-6 flex justify-between items-center w-full mx-auto flex-shrink-0"
-          onTouchStart={handleHeaderTouchStart}
-          onTouchMove={handleHeaderTouchMove}
-          onTouchEnd={handleHeaderTouchEnd}
           style={{ transform: `translateY(${pullOffset}px)`, transition: pullOffset === 0 ? 'transform 0.3s ease-out' : 'none' }}
         >
           <div className="flex items-center gap-3">
@@ -162,6 +165,9 @@ const HomeScreen = React.forwardRef<HTMLDivElement, HomeScreenProps>(({ onNaviga
         <div
           ref={songListRef}
           className="flex-grow flex flex-col items-center justify-start pb-32 overflow-y-auto w-full mx-auto px-6"
+          onTouchStart={handleListTouchStart}
+          onTouchMove={handleListTouchMove}
+          onTouchEnd={handleListTouchEnd}
         >
             {isEmpty ? (
               <motion.div
