@@ -142,53 +142,53 @@ const HomeScreen = React.forwardRef<HTMLDivElement, HomeScreenProps>(({ onNaviga
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.3 }}
-      className="h-[100dvh] bg-black text-white font-sans flex flex-col items-center relative overflow-hidden w-full"
+      className="fixed inset-0 bg-black text-white font-sans overflow-hidden w-full"
       onClick={() => setContextMenu(null)}
     >
       <GlassBackground />
 
-      <div className="w-full flex flex-col h-full z-10">
-        {/* Header - Fixed */}
-        <div
-          className="px-6 pt-12 pb-6 flex justify-between items-center w-full mx-auto flex-shrink-0"
-          style={{ transform: `translateY(${pullOffset}px)`, transition: pullOffset === 0 ? 'transform 0.3s ease-out' : 'none' }}
-        >
-          <div className="flex items-center gap-3">
-            <h1 className="text-4xl font-black uppercase tracking-tighter">SONGS</h1>
-          </div>
-          <div className="h-9 w-9 rounded-full bg-pink-400 flex items-center justify-center text-xs font-bold text-white border-2 border-black">
-            M
-          </div>
+      {/* Header - Fixed at top */}
+      <div
+        className="fixed top-0 left-0 right-0 px-6 pt-12 pb-6 flex justify-between items-center z-10 bg-black"
+        style={{ transform: `translateY(${pullOffset}px)`, transition: pullOffset === 0 ? 'transform 0.3s ease-out' : 'none' }}
+      >
+        <div className="flex items-center gap-3">
+          <h1 className="text-4xl font-black uppercase tracking-tighter">SONGS</h1>
         </div>
+        <div className="h-9 w-9 rounded-full bg-pink-400 flex items-center justify-center text-xs font-bold text-white border-2 border-black">
+          M
+        </div>
+      </div>
 
-        {/* Main Content - Scrollable */}
-        <div
-          ref={songListRef}
-          className="flex-grow flex flex-col items-center justify-start pb-32 overflow-y-auto w-full mx-auto px-6"
-          onTouchStart={handleListTouchStart}
-          onTouchMove={handleListTouchMove}
-          onTouchEnd={handleListTouchEnd}
-        >
-            {isEmpty ? (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 0.4, scale: 1 }}
-                className="flex flex-col items-center gap-6 mt-16"
-              >
-                {/* Empty State */}
-                <div className="text-center max-w-[300px]">
-                  <h3 className="text-3xl font-black uppercase text-zinc-800 leading-tight tracking-tighter">
-                    READY TO WRITE YOUR FIRST SONG?
-                  </h3>
-                </div>
-              </motion.div>
-            ) : (
-              <motion.div
-                variants={containerVariants}
-                initial="hidden"
-                animate="show"
-                className="w-full space-y-4 self-start"
-              >
+      {/* Main Content - Scrollable with top/bottom padding for header/footer */}
+      <div
+        ref={songListRef}
+        className="absolute inset-0 overflow-y-auto pt-[120px] pb-32"
+        onTouchStart={handleListTouchStart}
+        onTouchMove={handleListTouchMove}
+        onTouchEnd={handleListTouchEnd}
+      >
+        <div className="px-6">
+          {isEmpty ? (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 0.4, scale: 1 }}
+              className="flex flex-col items-center gap-6 mt-16"
+            >
+              {/* Empty State */}
+              <div className="text-center max-w-[300px]">
+                <h3 className="text-3xl font-black uppercase text-zinc-800 leading-tight tracking-tighter">
+                  READY TO WRITE YOUR FIRST SONG?
+                </h3>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              variants={containerVariants}
+              initial="hidden"
+              animate="show"
+              className="w-full space-y-4"
+            >
                 {currentProjects.map((project) => (
                   <motion.div
                     key={project.id}
@@ -210,26 +210,26 @@ const HomeScreen = React.forwardRef<HTMLDivElement, HomeScreenProps>(({ onNaviga
                     </div>
                   </motion.div>
                 ))}
-              </motion.div>
-            )}
-          </div>
-
-        {/* Footer Pill */}
-        <div className="w-full absolute bottom-4 left-1/2 transform -translate-x-1/2 z-20 flex justify-center pointer-events-none">
-          <motion.div className="bg-[#1c1c1e]/80 p-1.5 rounded-full flex items-center gap-1 shadow-2xl border border-white/10 pointer-events-auto backdrop-blur-sm">
-            <button className="bg-[#3a3a3c]/90 px-6 py-2.5 rounded-full flex items-center gap-2 transition-all">
-              <Home size={18} className="text-white" />
-              <span className="text-xs font-semibold text-white">Home</span>
-            </button>
-            <button
-              onClick={() => onNavigate('editor', 'Untitled Song')}
-              className="px-6 py-2.5 rounded-full flex items-center gap-2 hover:bg-white/10 transition-all text-gray-400"
-            >
-              <PlusCircle size={18} />
-              <span className="text-xs font-semibold">New</span>
-            </button>
-          </motion.div>
+            </motion.div>
+          )}
         </div>
+      </div>
+
+      {/* Footer Pill - Fixed at bottom */}
+      <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-20 flex justify-center pointer-events-none">
+        <motion.div className="bg-[#1c1c1e]/80 p-1.5 rounded-full flex items-center gap-1 shadow-2xl border border-white/10 pointer-events-auto backdrop-blur-sm">
+          <button className="bg-[#3a3a3c]/90 px-6 py-2.5 rounded-full flex items-center gap-2 transition-all">
+            <Home size={18} className="text-white" />
+            <span className="text-xs font-semibold text-white">Home</span>
+          </button>
+          <button
+            onClick={() => onNavigate('editor', 'Untitled Song')}
+            className="px-6 py-2.5 rounded-full flex items-center gap-2 hover:bg-white/10 transition-all text-gray-400"
+          >
+            <PlusCircle size={18} />
+            <span className="text-xs font-semibold">New</span>
+          </button>
+        </motion.div>
       </div>
 
       {/* Context Menu */}
