@@ -28,21 +28,31 @@ export function syncTracks(beatPlayer: HTMLAudioElement, vocalPlayer: HTMLAudioE
  * @returns Promise that resolves when both tracks start playing
  */
 export async function playBothTracks(
-    beatPlayer: HTMLAudioElement,
+    beatPlayer: HTMLAudioElement | null,
     vocalPlayer: HTMLAudioElement | null
 ): Promise<void> {
-    if (!beatPlayer) return;
+    if (!beatPlayer && (!vocalPlayer || !vocalPlayer.src)) return;
 
-    // Sync before playing
-    if (vocalPlayer && vocalPlayer.src) {
+    // Sync before playing if both exist
+    if (beatPlayer && vocalPlayer && vocalPlayer.src) {
         syncTracks(beatPlayer, vocalPlayer);
     }
 
-    // Play both simultaneously
-    const promises: Promise<void>[] = [beatPlayer.play()];
-    if (vocalPlayer && vocalPlayer.src) {
-        promises.push(vocalPlayer.play());
-    }
+    // Play available tracks with AbortError handling
+    const safePlay = async (player: HTMLAudioElement) => {
+        try {
+            await player.play();
+        } catch (err: any) {
+            // Ignore AbortError (happens when pausing while loading/playing)
+            if (err.name !== 'AbortError') {
+                console.error('Audio playback error:', err);
+            }
+        }
+    };
+
+    const promises: Promise<void>[] = [];
+    if (beatPlayer && beatPlayer.src) promises.push(safePlay(beatPlayer));
+    if (vocalPlayer && vocalPlayer.src) promises.push(safePlay(vocalPlayer));
 
     await Promise.all(promises);
 }

@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Play, Pause, Mic, Music, ChevronDown, Rewind, FastForward, Volume2 } from 'lucide-react';
+import { Play, Pause, Mic, Music, ChevronDown, Rewind, FastForward, Volume2, Edit2, Check, Sliders } from 'lucide-react';
+import { createVocalEffectChain, setEffectLevel, EffectChain } from '../services/audioEffectsService';
 import { motion, PanInfo } from 'framer-motion';
 import { TimedWord, TimedLine } from '../types';
-import { findLineIndexAtTime, HIGHLIGHT_LOOKAHEAD } from '../services/lyriqTranscriptionService';
-import { drawCenteredWaveform, decodeAudioFromUrl } from '../services/canvasWaveformService';
+import { transcribeAndGroupAudio, findLineIndexAtTime } from '../services/lyriqTranscriptionService';
+import { drawCenteredWaveform, decodeAudioFromUrl, drawLiveWaveform } from '../services/canvasWaveformService';
+
 import { playBothTracks, pauseBothTracks, seekBothTracks } from '../services/audioSyncService';
 import { getTimeFromEvent } from '../services/scrubbingService';
 
@@ -29,6 +31,13 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
 
+    // Audio FX State
+    const [effectChain, setEffectChain] = useState<EffectChain | null>(null);
+    const [fxSpace, setFxSpace] = useState(0); // Reverb (0-100)
+    const [fxWidth, setFxWidth] = useState(0); // Chorus (0-100)
+    const [fxDelay, setFxDelay] = useState(0); // Delay (0-100)
+    const [showFxPanel, setShowFxPanel] = useState(false);
+
     // Recording state
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
@@ -36,6 +45,11 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
     // Synced Lyrics State
     const [currentLineIndex, setCurrentLineIndex] = useState(0);
     const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+
+    // Local Transcription State
+    const [isTranscribing, setIsTranscribing] = useState(false);
+    const [localSyncedWords, setLocalSyncedWords] = useState<TimedWord[] | null>(null);
+    const [localSyncedLines, setLocalSyncedLines] = useState<TimedLine[] | null>(null);
 
     // Refs
     const audioContextRef = useRef<AudioContext | null>(null);
@@ -48,9 +62,14 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
     const lineElementsRef = useRef<(HTMLParagraphElement | null)[]>([]);
     const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
     const scrollTimeoutRef = useRef<number | null>(null);
+    const lastScrollY = useRef(0);
+    const lastScrollTime = useRef(0);
+    const modalCollapseTimeoutRef = useRef<number | null>(null);
     const beatWaveformCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const vocalWaveformCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const waveformAnimationRef = useRef<number | null>(null);
+    const analyserNodeRef = useRef<AnalyserNode | null>(null);
+    const visualizerAnimationRef = useRef<number | null>(null);
 
     // Waveform state
     const [beatAudioBuffer, setBeatAudioBuffer] = useState<AudioBuffer | null>(null);
@@ -81,13 +100,31 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
 
     // Time update loop
     useEffect(() => {
-        if (isPlaying && beatPlayerRef.current) {
-            const animate = () => {
-                if (beatPlayerRef.current) {
+        let startTime = Date.now() - (currentTime * 1000);
+
+        const animate = () => {
+            if (isPlaying) {
+                if (beatPlayerRef.current && !beatPlayerRef.current.paused) {
                     setCurrentTime(beatPlayerRef.current.currentTime);
+                } else if (vocalPlayerRef.current && !vocalPlayerRef.current.paused) {
+                    setCurrentTime(vocalPlayerRef.current.currentTime);
                 }
-                animationFrameRef.current = requestAnimationFrame(animate);
-            };
+            } else if (isRecording) {
+                // If recording without beat playback, update time manually
+                if (!isPlaying) {
+                    const now = Date.now();
+                    setCurrentTime((now - startTime) / 1000);
+                }
+            }
+            animationFrameRef.current = requestAnimationFrame(animate);
+        };
+
+        if (isPlaying || isRecording) {
+            // Reset start time reference if starting fresh
+            if (!isPlaying && isRecording) {
+                startTime = Date.now() - (currentTime * 1000);
+            }
+
             animationFrameRef.current = requestAnimationFrame(animate);
         } else {
             if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
@@ -96,7 +133,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
         return () => {
             if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
         };
-    }, [isPlaying]);
+    }, [isPlaying, isRecording]);
 
     // Update duration when beat loads and decode audio for waveform
     useEffect(() => {
@@ -130,28 +167,79 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
         };
     }, [beatUrl, initAudioContext]);
 
+    // Update FX Levels in Real-time
+    useEffect(() => {
+        if (!effectChain) return;
+        setEffectLevel(effectChain.reverbGain, fxSpace);
+    }, [fxSpace, effectChain]);
+
+    useEffect(() => {
+        if (!effectChain) return;
+        setEffectLevel(effectChain.widthGain, fxWidth);
+    }, [fxWidth, effectChain]);
+
+    useEffect(() => {
+        if (!effectChain) return;
+        setEffectLevel(effectChain.delayGain, fxDelay);
+    }, [fxDelay, effectChain]);
+
+    // Auto-scroll and highlighting effect
+    // Line-by-Line Sync Logic (Apple Music Style)
+    const HIGHLIGHT_OFFSET = 0.15; // 0.15s lookahead
+
     // Auto-scroll and highlighting effect
     useEffect(() => {
-        if (!syncedLines || syncedLines.length === 0 || !isPlaying) return;
+        const activeLines = localSyncedLines || syncedLines;
 
-        const lookaheadTime = currentTime + HIGHLIGHT_LOOKAHEAD;
-        const newLineIndex = findLineIndexAtTime(lookaheadTime, syncedLines);
+        if (!activeLines || activeLines.length === 0 || !isPlaying) return;
 
-        if (newLineIndex !== currentLineIndex && newLineIndex >= 0) {
+        const lookaheadTime = currentTime + HIGHLIGHT_OFFSET;
+        const newLineIndex = findLineIndexAtTime(lookaheadTime, activeLines);
+
+        if (newLineIndex !== currentLineIndex) {
             setCurrentLineIndex(newLineIndex);
 
             // Auto-scroll to active line
             if (autoScrollEnabled && lineElementsRef.current[newLineIndex]) {
                 lineElementsRef.current[newLineIndex]?.scrollIntoView({
                     behavior: 'smooth',
-                    block: 'start'
+                    block: 'center'
                 });
             }
         }
-    }, [currentTime, syncedLines, isPlaying, currentLineIndex, autoScrollEnabled]);
+    }, [currentTime, syncedLines, localSyncedLines, isPlaying, currentLineIndex, autoScrollEnabled]);
 
-    // Disable auto-scroll when user manually scrolls
+    // Disable auto-scroll when user manually scrolls + smart modal behavior
     const handleUserScroll = useCallback(() => {
+        const now = Date.now();
+        // Throttle to max once per 100ms
+        if (now - lastScrollTime.current < 100) return;
+        lastScrollTime.current = now;
+
+        const currentScrollY = lyricsContainerRef.current?.scrollTop || 0;
+        const scrollDelta = currentScrollY - lastScrollY.current;
+        lastScrollY.current = currentScrollY;
+
+        // Detect scroll direction and update modal state
+        if (Math.abs(scrollDelta) > 5) { // Ignore tiny movements
+            // Clear existing modal timeout
+            if (modalCollapseTimeoutRef.current) {
+                clearTimeout(modalCollapseTimeoutRef.current);
+            }
+
+            // Debounce modal state change (200ms)
+            modalCollapseTimeoutRef.current = window.setTimeout(() => {
+                if (scrollDelta > 0 && viewState === 'expanded') {
+                    // Scrolling down → collapse to peek
+                    onViewStateChange('peeking');
+                } else if (scrollDelta < 0 && viewState === 'peeking') {
+                    // Scrolling up → expand
+                    onViewStateChange('expanded');
+                }
+                modalCollapseTimeoutRef.current = null;
+            }, 200);
+        }
+
         if (isPlaying) {
             setAutoScrollEnabled(false);
             // Clear existing timeout if any
@@ -164,13 +252,37 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                 scrollTimeoutRef.current = null;
             }, 3000);
         }
-    }, [isPlaying]);
+    }, [isPlaying, viewState, onViewStateChange]);
 
-    // Cleanup timeout on unmount
+    // Click-to-seek: Jump playback to clicked line
+    const handleLineClick = useCallback((lineIndex: number) => {
+        const lines = localSyncedLines || syncedLines;
+        const line = lines?.[lineIndex];
+        if (!line) return;
+
+        // Seek to line start
+        seekBothTracks(
+            line.start,
+            beatPlayerRef.current!,
+            vocalPlayerRef.current
+        );
+
+        // Update current line immediately
+        setCurrentLineIndex(lineIndex);
+        setCurrentTime(line.start);
+
+        // Re-enable auto-scroll
+        setAutoScrollEnabled(true);
+    }, [localSyncedLines, syncedLines, duration]);
+
+    // Cleanup timeouts on unmount
     useEffect(() => {
         return () => {
             if (scrollTimeoutRef.current) {
                 clearTimeout(scrollTimeoutRef.current);
+            }
+            if (modalCollapseTimeoutRef.current) {
+                clearTimeout(modalCollapseTimeoutRef.current);
             }
         };
     }, []);
@@ -183,17 +295,22 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // Set canvas size based on container
+        // Set canvas size based on its actual rendered size (controlled by CSS)
         const resizeCanvas = () => {
-            const container = canvas.parentElement;
-            if (container) {
-                const dpr = window.devicePixelRatio || 1;
-                const rect = container.getBoundingClientRect();
-                canvas.width = rect.width * dpr;
-                canvas.height = rect.height * dpr;
+            const dpr = window.devicePixelRatio || 1;
+            // Use canvas rect, not container, because container holds both canvases now
+            const rect = canvas.getBoundingClientRect();
+
+            // Avoid zero-size issues if hidden
+            if (rect.width === 0 || rect.height === 0) return;
+
+            const newWidth = rect.width * dpr;
+            const newHeight = rect.height * dpr;
+
+            if (canvas.width !== newWidth || canvas.height !== newHeight) {
+                canvas.width = newWidth;
+                canvas.height = newHeight;
                 ctx.scale(dpr, dpr);
-                canvas.style.width = `${rect.width}px`;
-                canvas.style.height = `${rect.height}px`;
             }
         };
 
@@ -227,15 +344,18 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
 
         // Set canvas size
         const resizeCanvas = () => {
-            const container = canvas.parentElement;
-            if (container) {
-                const dpr = window.devicePixelRatio || 1;
-                const rect = container.getBoundingClientRect();
-                canvas.width = rect.width * dpr;
-                canvas.height = rect.height * dpr;
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+
+            if (rect.width === 0 || rect.height === 0) return;
+
+            const newWidth = rect.width * dpr;
+            const newHeight = rect.height * dpr;
+
+            if (canvas.width !== newWidth || canvas.height !== newHeight) {
+                canvas.width = newWidth;
+                canvas.height = newHeight;
                 ctx.scale(dpr, dpr);
-                canvas.style.width = `${rect.width}px`;
-                canvas.style.height = `${rect.height}px`;
             }
         };
 
@@ -257,28 +377,60 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
         if (!ctx) return;
 
         if (isPlaying) {
-            pauseBothTracks(beatPlayerRef.current, vocalPlayerRef.current);
+            pauseBothTracks(beatPlayerRef.current!, vocalPlayerRef.current);
             setIsPlaying(false);
         } else {
-            // Only try to connect the source if a beat is loaded
-            if (beatPlayerRef.current && beatUrl) {
-                // Connect beat track to audio context
-                if (!beatSourceNodeRef.current) {
+            // Check if we have EITHER a beat OR a vocal track to play
+            if ((beatPlayerRef.current && beatUrl) || (vocalPlayerRef.current && vocalUrl)) {
+
+                // Connect beat track to audio context if exists
+                if (beatPlayerRef.current && beatUrl && !beatSourceNodeRef.current) {
                     try {
                         beatSourceNodeRef.current = ctx.createMediaElementSource(beatPlayerRef.current);
                         beatSourceNodeRef.current.connect(ctx.destination);
                     } catch (e) { /* console.warn("Beat source already connected", e); */ }
                 }
 
-                // Connect vocal track to audio context if exists
+                // Connect                // 2. Connect Vocal Track WITH EFFECTS CHAIN
                 if (vocalPlayerRef.current && vocalUrl && !vocalSourceNodeRef.current) {
                     try {
                         vocalSourceNodeRef.current = ctx.createMediaElementSource(vocalPlayerRef.current);
-                        vocalSourceNodeRef.current.connect(ctx.destination);
-                    } catch (e) { /* console.warn("Vocal source already connected", e); */ }
+
+                        // Create Effect Chain if not exists
+                        let chain = effectChain;
+                        if (!chain) {
+                            chain = createVocalEffectChain(ctx);
+                            setEffectChain(chain);
+                        }
+
+                        // Source -> Effect Input
+                        vocalSourceNodeRef.current.disconnect(); // Disconnect from prev destination
+                        vocalSourceNodeRef.current.connect(chain!.inputNode);
+
+                        // Effect Output -> Speakers
+                        chain!.outputNode.connect(ctx.destination);
+
+                        // Apply current levels
+                        setEffectLevel(chain!.reverbGain, fxSpace);
+                        setEffectLevel(chain!.widthGain, fxWidth);
+                        setEffectLevel(chain!.delayGain, fxDelay);
+
+                    } catch (e) {
+                        console.error("FX Setup Error", e);
+                        // Fallback to direct connection if FX fails
+                        if (vocalSourceNodeRef.current) {
+                            try { vocalSourceNodeRef.current.connect(ctx.destination); } catch (err) { }
+                        }
+                    }
                 }
 
-                // Play both tracks in sync
+                // Auto-rewind if at end
+                if (currentTime >= duration && duration > 0) {
+                    seekBothTracks(0, beatPlayerRef.current, vocalPlayerRef.current);
+                    setCurrentTime(0);
+                }
+
+                // Play available tracks
                 await playBothTracks(beatPlayerRef.current, vocalPlayerRef.current);
                 setIsPlaying(true);
             }
@@ -374,10 +526,27 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
                 mediaRecorderRef.current.stop();
             }
+            // Stop Visualizer
+            if (visualizerAnimationRef.current) {
+                cancelAnimationFrame(visualizerAnimationRef.current);
+                visualizerAnimationRef.current = null;
+            }
+            // Analyser node cleanup is handled by GC as simple JS object, 
+            // but we might want to check if we need to disconnect source. 
+            // Since source was local, it will be GC'd when stream tracks stop.
+            analyserNodeRef.current = null;
         } else {
             // Start recording
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        channelCount: 1,
+                        sampleRate: 24000
+                    }
+                });
 
                 // Determine best mime type
                 const mimeTypes = [
@@ -419,6 +588,11 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                     try {
                         const buffer = await decodeAudioFromUrl(url, ctx);
                         setVocalAudioBuffer(buffer);
+
+                        // Update duration if we don't have one (acapella) or if vocal is longer
+                        if (duration === 0 || buffer.duration > duration) {
+                            setDuration(buffer.duration);
+                        }
                     } catch (err) {
                         console.error('Failed to decode vocal recording:', err);
                     }
@@ -426,10 +600,82 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                     // Stop all tracks in the stream
                     stream.getTracks().forEach(track => track.stop());
                     setIsRecording(false);
+
+                    // Start Transcription
+                    setIsTranscribing(true);
+                    try {
+                        const { words, lines } = await transcribeAndGroupAudio(audioBlob);
+                        setLocalSyncedWords(words);
+                        setLocalSyncedLines(lines);
+                        console.log('Transcription complete:', words, lines);
+                    } catch (error: any) {
+                        console.error('Transcription failed:', error);
+                        const errorMessage = error?.message || 'Unknown error';
+                        const stack = error?.stack || 'No stack trace';
+                        alert(`Transcription failed.\n\nError: ${errorMessage}\n\nStack: ${stack.substring(0, 200)}...`);
+                    } finally {
+                        setIsTranscribing(false);
+                    }
                 };
 
                 mediaRecorderRef.current.start();
                 setIsRecording(true);
+
+                // Setup Live Visualizer
+                const audioCtx = initAudioContext();
+                const source = audioCtx.createMediaStreamSource(stream);
+                const analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 2048;
+
+                // --- Live FX Monitoring Setup ---
+                let chain = effectChain;
+                if (!chain) {
+                    chain = createVocalEffectChain(audioCtx);
+                    setEffectChain(chain);
+                }
+
+                // Mic -> Analyser (for waveform)
+                source.connect(analyser);
+                analyserNodeRef.current = analyser;
+
+                // Mic -> FX Chain -> Speakers (Monitoring)
+                source.connect(chain.inputNode);
+                chain.outputNode.connect(audioCtx.destination);
+
+                // Sync current UI levels to the new chain
+                setEffectLevel(chain.reverbGain, fxSpace);
+                setEffectLevel(chain.widthGain, fxWidth);
+                setEffectLevel(chain.delayGain, fxDelay);
+
+                const drawVisualizer = () => {
+                    if (!vocalWaveformCanvasRef.current || !analyserNodeRef.current) return;
+                    const canvas = vocalWaveformCanvasRef.current;
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) return;
+
+                    // Ensure canvas size matches display size
+                    const dpr = window.devicePixelRatio || 1;
+                    const rect = canvas.getBoundingClientRect();
+                    const width = rect.width * dpr;
+                    const height = rect.height * dpr;
+
+                    if (canvas.width !== width || canvas.height !== height) {
+                        canvas.width = width;
+                        canvas.height = height;
+                        ctx.scale(dpr, dpr);
+                    }
+
+                    const bufferLength = analyserNodeRef.current.frequencyBinCount;
+                    const dataArray = new Uint8Array(bufferLength);
+                    analyserNodeRef.current.getByteTimeDomainData(dataArray);
+
+                    // Use context wrapper to handle scaling if needed, or pass raw canvas dimensions
+                    // drawLiveWaveform handles clearRect using passed width/height
+                    drawLiveWaveform(ctx, dataArray, bufferLength);
+
+                    visualizerAnimationRef.current = requestAnimationFrame(drawVisualizer);
+                };
+                drawVisualizer();
 
                 // If beat is playing, keep it playing during recording
                 // Otherwise, start playing the beat for recording
@@ -441,6 +687,11 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                 alert('Could not access microphone. Please ensure permissions are granted.');
             }
         }
+    };
+
+    // Editing Handlers
+    const handleEditToggle = () => {
+        // Edit feature removed for Apple Music style
     };
 
     // Helper to format time
@@ -498,78 +749,54 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                     <ChevronDown className="rotate-90" size={28} />
                 </button>
                 <div className="flex flex-col items-center">
-                    <h1 className="text-white font-extrabold text-2xl flex items-center gap-2">
+                    <h1 className={`text-white font-extrabold flex items-center gap-2 transition-all duration-700 ease-out 
+                        ${((localSyncedLines && localSyncedLines.length > 0) || (syncedLines && syncedLines.length > 0)) ? 'text-2xl mt-0' : 'text-4xl mt-0'}`}>
                         {songTitle}
-                        <span className="p-1 bg-zinc-800 rounded-full text-pink-500"><div className="w-3 h-3 border-2 border-current rounded-sm" /></span>
                     </h1>
                 </div>
-                <div className="w-10" /> {/* Spacer */}
+                <div className="w-10" />
             </div>
 
             {/* Lyrics Area (Main Page Content) */}
             <div
                 ref={lyricsContainerRef}
-                className="flex-grow overflow-y-auto px-8 pt-28 pb-40 flex flex-col items-center justify-center space-y-8 text-center lyriq-player-view"
-                style={{ scrollSnapType: 'y mandatory' }}
+                className="flex-grow overflow-y-auto px-4 md:px-8 pt-24 md:pt-[50vh] pb-48 md:pb-[50vh] flex flex-col items-center space-y-6 text-center lyriq-player-view"
                 onScroll={handleUserScroll}
             >
-                {syncedLines && syncedLines.length > 0 ? (
-                    /* Synced Lyrics Mode - with word-level highlighting */
-                    syncedLines.map((line, i) => (
+                {isTranscribing ? (
+                    <div className="flex flex-col items-center justify-center space-y-4 animate-pulse">
+                        <div className="w-8 h-8 border-4 border-white/20 border-t-white rounded-full animate-spin" />
+                        <p className="text-zinc-400 font-medium">Transcribing your flow...</p>
+                    </div>
+                ) : (localSyncedLines && localSyncedLines.length > 0) || (syncedLines && syncedLines.length > 0) ? (
+                    /* Synced Lyrics Mode - Apple Music Style */
+                    (localSyncedLines || syncedLines)!.map((line, i) => (
                         <p
                             key={i}
                             ref={el => { lineElementsRef.current[i] = el; }}
-                            className={`lyriq-line text-3xl font-extrabold transition-all duration-500 cursor-default p-2 rounded-lg 
-                                ${i === currentLineIndex ? 'text-white scale-105 bg-pink-500/10 highlighted-line' : 'text-zinc-600'}`}
-                            style={{ scrollSnapAlign: 'center', minHeight: '50px' }}
+                            onClick={() => handleLineClick(i)}
+                            className={`lyriq-line text-xl md:text-3xl transition-all duration-500 p-3 md:p-4 rounded-xl cursor-pointer
+                                ${i === currentLineIndex
+                                    ? 'text-white scale-105 opacity-100 blur-0 font-extrabold'
+                                    : 'text-zinc-500 scale-100 opacity-50 blur-[0.5px] font-semibold hover:opacity-80'}`}
+                            style={{ minHeight: '60px' }}
                             data-start={line.start}
                             data-end={line.end}
                         >
                             {/* Render words with individual data attributes for karaoke effect */}
-                            {syncedWords ? (() => {
-                                // Filter syncedWords to only words within this line's time range
-                                const lineWords = syncedWords.filter(w =>
-                                    w.start >= line.start && w.end <= line.end
-                                );
-                                return lineWords.map((timedWord, wordIdx) => {
-                                    const isHighlighted = currentTime >= timedWord.start;
-                                    return (
-                                        <span
-                                            key={wordIdx}
-                                            className={`lyriq-word ${isHighlighted ? 'highlighted-word' : ''}`}
-                                            data-start={timedWord.start}
-                                            data-end={timedWord.end}
-                                        >
-                                            {timedWord.word}{' '}
-                                        </span>
-                                    );
-                                });
-                            })() : (
-                                line.text
-                            )}
-                        </p>
-                    ))
-                ) : lyricsText.length > 0 ? (
-                    /* Regular Lyrics Mode - no sync */
-                    lyricsText.map((line, i) => (
-                        <p
-                            key={i}
-                            ref={el => { lineElementsRef.current[i] = el; }}
-                            className={`lyriq-line text-3xl font-extrabold transition-all duration-500 cursor-default p-2 rounded-lg 
-                                ${i === currentLineIndex ? 'text-white scale-105 bg-pink-500/10 highlighted-line' : 'text-zinc-600'}`}
-                            style={{ scrollSnapAlign: 'center', minHeight: '50px' }}
-                        >
-                            {line}
+                            {/* Apple Music Style - Line Highlighting Only */}
+                            {line.text}
+
                         </p>
                     ))
                 ) : (
-                    <p className="text-zinc-600 text-3xl font-bold mt-20">Type your lyrics and flow begins here.</p>
+                    <p className="text-zinc-600 text-3xl font-bold mt-20">Find Your Flow</p>
                 )}
             </div>
 
             {/* Slide-Up Player Modal (CSS Transition) */}
             <div
-                className={`lyriq-controls-modal ${viewState === 'expanded' ? 'visible' : viewState === 'peeking' ? 'peeking' : 'hidden'}`}
+                className={`lyriq-controls-modal ${viewState === 'expanded' ? 'visible' : viewState === 'peeking' ? 'peeking' : 'hidden'} ${beatUrl ? 'has-beat' : ''}`}
                 onClick={() => {
                     if (viewState === 'peeking') onViewStateChange('expanded');
                 }}
@@ -655,48 +882,38 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                         <div className="relative w-full">
 
                             {/* Track Icons - Absolute position left of the waveform */}
-                            <div className="absolute top-1/2 -translate-y-1/2 left-0 -ml-1 flex flex-col items-center justify-around h-20 text-zinc-500">
-                                <Music size={20} className={beatUrl ? "text-pink-500" : "text-zinc-500"} title="Beat Track" />
-                                <div className="h-4"></div> {/* Small spacer */}
+                            {/* Track Icons - Absolute position left of the waveform */}
+                            <div className="absolute top-1/2 -translate-y-1/2 left-0 -ml-1 flex flex-col items-center justify-around h-20 text-zinc-500 z-10">
+                                <div
+                                    className="cursor-pointer hover:text-white transition-colors p-1"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        fileInputRef.current?.click();
+                                    }}
+                                >
+                                    <Music size={20} className={beatUrl ? "text-pink-500" : "text-zinc-500"} title="Upload Beat" />
+                                </div>
+                                <div className="h-2"></div> {/* Small spacer */}
                                 <Mic size={20} className={isRecording ? "text-red-500" : "text-zinc-500"} title="Vocal Track" />
                             </div>
 
                             {/* Waveform Container - Dual Track Stack */}
                             <div
                                 ref={waveformContainerRef}
-                                className="ml-10 h-24 bg-zinc-800/50 rounded-lg relative overflow-hidden cursor-pointer"
+                                className="lyriq-waveforms cursor-pointer"
                                 onMouseDown={handleScrubStart}
                                 onTouchStart={handleScrubStart}
                             >
-                                {/* Beat Track Waveform (Bottom Layer) */}
-                                <div className="absolute inset-0 flex items-end p-2 pointer-events-none">
-                                    {beatAudioBuffer ? (
-                                        <canvas
-                                            ref={beatWaveformCanvasRef}
-                                            className="w-full h-1/2"
-                                        />
-                                    ) : (
-                                        <div className="w-full h-1/2 flex items-center justify-center gap-0.5 opacity-30">
-                                            {Array.from({ length: 100 }).map((_, i) => (
-                                                <div
-                                                    key={i}
-                                                    className="w-0.5 bg-zinc-600 rounded-full"
-                                                    style={{ height: `${Math.max(5, Math.random() * 60)}%` }}
-                                                />
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Vocal Track Waveform (Top Layer) */}
-                                {vocalAudioBuffer && (
-                                    <div className="absolute inset-0 flex items-start p-2">
-                                        <canvas
-                                            ref={vocalWaveformCanvasRef}
-                                            className="w-full h-1/2"
-                                        />
-                                    </div>
-                                )}
+                                <canvas
+                                    ref={beatWaveformCanvasRef}
+                                    id="beatWaveformCanvas"
+                                    width={3344}
+                                />
+                                <canvas
+                                    ref={vocalWaveformCanvasRef}
+                                    id="vocalWaveformCanvas"
+                                    width={3344}
+                                />
                             </div>
 
                             {/* Volume Mixer Overlay */}
@@ -754,10 +971,71 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
                                     )}
                                 </motion.div>
                             )}
+
+                            {/* FX Panel Overlay (Room, Width, Delay) */}
+                            {showFxPanel && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -10 }}
+                                    className="absolute top-0 left-0 right-0 ml-10 h-32 bg-zinc-900/95 backdrop-blur-sm rounded-lg border border-cyan-500/20 p-4 flex flex-col justify-center gap-2 z-20"
+                                >
+                                    {/* Room Reverb Slider */}
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-[10px] uppercase font-bold text-cyan-500 w-12 tracking-wider">Room</span>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={fxSpace}
+                                            onChange={(e) => setFxSpace(Number(e.target.value))}
+                                            className="flex-grow h-1.5 bg-zinc-700 rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-cyan-400"
+                                        />
+                                        <span className="text-xs text-zinc-400 w-8 text-right">{fxSpace}%</span>
+                                    </div>
+
+                                    {/* Width Slider */}
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-[10px] uppercase font-bold text-violet-500 w-12 tracking-wider">Width</span>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={fxWidth}
+                                            onChange={(e) => setFxWidth(Number(e.target.value))}
+                                            className="flex-grow h-1.5 bg-zinc-700 rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-violet-400"
+                                        />
+                                        <span className="text-xs text-zinc-400 w-8 text-right">{fxWidth}%</span>
+                                    </div>
+
+                                    {/* Delay Slider */}
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-[10px] uppercase font-bold text-blue-500 w-12 tracking-wider">Delay</span>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={fxDelay}
+                                            onChange={(e) => setFxDelay(Number(e.target.value))}
+                                            className="flex-grow h-1.5 bg-zinc-700 rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-400"
+                                        />
+                                        <span className="text-xs text-zinc-400 w-8 text-right">{fxDelay}%</span>
+                                    </div>
+                                </motion.div>
+                            )}
                         </div>
 
                         {/* Floating Action Buttons (Centered below waveform) */}
                         <div className="flex items-center justify-center gap-8 mt-6">
+
+                            {/* FX Toggle Button */}
+                            <button
+                                onClick={() => setShowFxPanel(!showFxPanel)}
+                                className={`p-2.5 transition-colors rounded-full w-11 h-11 flex items-center justify-center ${showFxPanel ? 'text-cyan-400 bg-cyan-400/10' : 'text-zinc-400 hover:text-white'}`}
+                                title="Toggle Effects"
+                            >
+                                <Sliders size={20} />
+                            </button>
 
                             {/* Volume Button */}
                             <button
@@ -770,11 +1048,11 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
 
                             {/* Record Button */}
                             <button
-                                className={`py-2.5 px-4 rounded-full transition-all duration-300 ${isRecording ? 'bg-red-600 text-white animate-pulse shadow-2xl shadow-red-900' : 'bg-red-600 hover:bg-red-700 shadow-lg shadow-red-900'}`}
+                                className={`py-2.5 px-4 rounded-full transition-all duration-300 ${isRecording ? 'bg-red-600 text-white animate-pulse' : 'bg-red-600 hover:bg-red-700'}`}
                                 onClick={toggleRecording}
                                 title={isRecording ? "Stop Recording" : "Start Recording"}
                             >
-                                <div className={`w-8 h-8 rounded-full ${isRecording ? 'bg-white' : 'bg-red-500/0'}`} />
+                                <div className={`w-8 h-8 transition-all duration-300 bg-white ${isRecording ? 'rounded-md scale-50' : 'rounded-full scale-50'}`} />
                             </button>
 
                             {/* Play/Pause Button */}

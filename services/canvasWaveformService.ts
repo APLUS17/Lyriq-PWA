@@ -17,6 +17,8 @@ export function drawStaticWaveform(ctx: CanvasRenderingContext2D, buffer: AudioB
     const amp = height / 2;
     const progressPixels = width * progress;
 
+    // Reset transform to ensure we draw in physical pixels
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
     const drawBars = (from: number, to: number, color: string) => {
@@ -62,6 +64,8 @@ export function drawCenteredWaveform(ctx: CanvasRenderingContext2D, buffer: Audi
     const centerY = height / 2;
     const progressPixels = width * progress;
 
+    // Reset transform to ensure we draw in physical pixels
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
     // Draw waveform bars centered vertically
@@ -75,7 +79,7 @@ export function drawCenteredWaveform(ctx: CanvasRenderingContext2D, buffer: Audi
             if (datum > max) max = datum;
         }
 
-        const barHeight = Math.max(1, (max - min) * centerY * 0.9);
+        const barHeight = Math.max(1, (max - min) * centerY * 0.8);
         const isPlayed = i < progressPixels;
 
         // Color: pink for played, zinc for unplayed
@@ -101,4 +105,47 @@ export async function decodeAudioFromUrl(audioUrl: string, audioContext: AudioCo
     const response = await fetch(audioUrl);
     const arrayBuffer = await response.arrayBuffer();
     return await audioContext.decodeAudioData(arrayBuffer);
+}
+
+/**
+ * Draws a live dynamic waveform from AnalyserNode data.
+ * Optimized for real-time visualization during recording.
+ */
+export function drawLiveWaveform(
+    ctx: CanvasRenderingContext2D,
+    dataArray: Uint8Array,
+    bufferLength: number,
+    color: string = '#ec4899' // pink-500
+): void {
+    if (!ctx) return;
+
+    const canvas = ctx.canvas;
+    const width = canvas.width;
+    const height = canvas.height;
+    const centerY = height / 2;
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+
+    const sliceWidth = width * 1.0 / bufferLength;
+    let x = 0;
+
+    for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 128.0; // Normalize 0-255 to 0-2 (1 is center)
+        const y = v * height / 2; // Map to canvas height
+
+        // Draw centered
+        if (i === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
+
+        x += sliceWidth;
+    }
+
+    ctx.lineTo(canvas.width, canvas.height / 2);
+    ctx.stroke();
 }
