@@ -742,15 +742,24 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
     }).filter(line => line.trim() !== '');
 
     return (
-        <div className="w-full h-full fixed inset-0 z-50 bg-zinc-950 flex flex-col font-sans">
+        <div className="w-full h-full fixed inset-0 z-50 bg-[var(--pulp-base)] flex flex-col font-sans">
+            {/* Pulp Grain Overlay */}
+            <svg className="pulp-grain" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                <filter id="flowNoiseFilter">
+                    <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="4" stitchTiles="stitch" />
+                    <feColorMatrix type="saturate" values="0" />
+                </filter>
+                <rect width="100%" height="100%" filter="url(#flowNoiseFilter)" />
+            </svg>
+
             {/* Page Header */}
             <div className="absolute top-0 left-0 right-0 p-6 z-40 flex items-center justify-between">
-                <button onClick={onBack} className="p-2 text-gray-400 hover:text-white transition-colors">
-                    <ChevronDown className="rotate-90" size={28} />
+                <button onClick={onBack} className="pulp-btn !w-10 !h-10">
+                    <ChevronDown className="rotate-90" size={20} />
                 </button>
                 <div className="flex flex-col items-center">
-                    <h1 className={`text-white font-extrabold flex items-center gap-2 transition-all duration-700 ease-out 
-                        ${((localSyncedLines && localSyncedLines.length > 0) || (syncedLines && syncedLines.length > 0)) ? 'text-2xl mt-0' : 'text-4xl mt-0'}`}>
+                    <h1 className={`pulp-title text-[var(--pulp-ink)] flex items-center gap-2 transition-all duration-700 ease-out 
+                        ${((localSyncedLines && localSyncedLines.length > 0) || (syncedLines && syncedLines.length > 0)) ? 'text-2xl mt-0' : 'text-3xl mt-0'}`}>
                         {songTitle}
                     </h1>
                 </div>
@@ -760,37 +769,34 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
             {/* Lyrics Area (Main Page Content) */}
             <div
                 ref={lyricsContainerRef}
-                className="flex-grow overflow-y-auto px-4 md:px-8 pt-24 md:pt-[50vh] pb-48 md:pb-[50vh] flex flex-col items-center space-y-6 text-center lyriq-player-view"
+                className="flex-grow overflow-y-auto px-4 md:px-8 pt-24 md:pt-[50vh] pb-48 md:pb-[50vh] flex flex-col items-center space-y-6 text-center"
                 onScroll={handleUserScroll}
             >
                 {isTranscribing ? (
                     <div className="flex flex-col items-center justify-center space-y-4 animate-pulse">
-                        <div className="w-8 h-8 border-4 border-white/20 border-t-white rounded-full animate-spin" />
-                        <p className="text-zinc-400 font-medium">Transcribing your flow...</p>
+                        <div className="w-8 h-8 border-4 border-[var(--pulp-ink)]/20 border-t-[var(--pulp-ink)] rounded-full animate-spin" />
+                        <p className="text-[var(--pulp-ink)] opacity-60 font-mono">Transcribing your flow...</p>
                     </div>
                 ) : (localSyncedLines && localSyncedLines.length > 0) || (syncedLines && syncedLines.length > 0) ? (
-                    /* Synced Lyrics Mode - Apple Music Style */
+                    /* Synced Lyrics Mode - Pulp Style */
                     (localSyncedLines || syncedLines)!.map((line, i) => (
                         <p
                             key={i}
                             ref={el => { lineElementsRef.current[i] = el; }}
                             onClick={() => handleLineClick(i)}
-                            className={`lyriq-line text-xl md:text-3xl transition-all duration-500 p-3 md:p-4 rounded-xl cursor-pointer
+                            className={`lyriq-line text-xl md:text-2xl transition-all duration-500 p-3 md:p-4 rounded-xl cursor-pointer font-mono
                                 ${i === currentLineIndex
-                                    ? 'text-white scale-105 opacity-100 blur-0 font-extrabold'
-                                    : 'text-zinc-500 scale-100 opacity-50 blur-[0.5px] font-semibold hover:opacity-80'}`}
-                            style={{ minHeight: '60px' }}
+                                    ? 'text-[var(--pulp-ink)] scale-105 opacity-100 blur-0 font-bold'
+                                    : 'text-[var(--pulp-ink)] scale-100 opacity-30 blur-[0.5px] font-medium hover:opacity-50'}`}
+                            style={{ minHeight: '60px', textShadow: i === currentLineIndex ? '1px 1px 0px rgba(255,255,255,0.5)' : 'none' }}
                             data-start={line.start}
                             data-end={line.end}
                         >
-                            {/* Render words with individual data attributes for karaoke effect */}
-                            {/* Apple Music Style - Line Highlighting Only */}
                             {line.text}
-
                         </p>
                     ))
                 ) : (
-                    <p className="text-zinc-600 text-3xl font-bold mt-20">Find Your Flow</p>
+                    <p className="text-[var(--pulp-ink)] opacity-30 text-3xl font-bold mt-20 pulp-title">Find Your Flow</p>
                 )}
             </div>
 

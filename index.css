@@ -101,7 +101,8 @@ html {
 /* iOS PWA specific tweaks */
 @media all and (display-mode: standalone) {
   body {
-    /* Adjustments for standalone mode if needed */
+    /* PWA standalone mode: no specific overrides needed currently */
+    display: block;
   }
 }
 
@@ -210,6 +211,240 @@ html {
   --color-text-tertiary: #71717a;
   /* zinc-500 */
   --color-text: #ffffff;
+
+  /* Pulp Theme Variables */
+  --pulp-base: #e8e4de;
+  --pulp-shadow: #cfc9bf;
+  --pulp-highlight: #ffffff;
+  --pulp-ink: #2a2a2a;
+  --pulp-accent: #4a5dff;
+  --pulp-grain-opacity: 0.15;
+}
+
+/* ========== PULP EDITOR STYLES ========== */
+
+/* Pulp Canvas Container */
+.pulp-canvas {
+  position: relative;
+  background: var(--pulp-base);
+  box-shadow:
+    20px 20px 60px var(--pulp-shadow),
+    -20px -20px 60px var(--pulp-highlight);
+  animation: pulpSheetEntry 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes pulpSheetEntry {
+  from {
+    opacity: 0;
+    transform: translateY(40px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Pulp Grain Overlay */
+.pulp-grain {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 100;
+  opacity: var(--pulp-grain-opacity);
+  mix-blend-mode: multiply;
+}
+
+/* Pulp Fiber Decorations */
+.pulp-fiber {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.05);
+  pointer-events: none;
+}
+
+/* Pulp Header */
+.pulp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.05);
+  padding-bottom: 20px;
+}
+
+.pulp-title {
+  font-family: 'Archivo', sans-serif;
+  font-size: 2.5rem;
+  letter-spacing: -2px;
+  text-transform: uppercase;
+  line-height: 0.9;
+  color: var(--pulp-ink);
+  font-weight: 800;
+}
+
+.pulp-meta {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.75rem;
+  text-align: right;
+  opacity: 0.6;
+  color: var(--pulp-ink);
+}
+
+/* Pulp Lyrics Text Area */
+.pulp-lyrics-area {
+  font-family: 'Space Mono', monospace;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--pulp-ink);
+  /* Letterpress / Indentation Effect */
+  text-shadow:
+    1px 1px 0px rgba(255, 255, 255, 0.5),
+    -0.5px -0.5px 0px rgba(0, 0, 0, 0.2);
+}
+
+.pulp-lyrics-area::selection {
+  background: rgba(74, 93, 255, 0.1);
+  color: var(--pulp-accent);
+}
+
+/* Pulp Editor Container (scrollable) */
+.pulp-editor-container {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding-right: 20px;
+  scrollbar-width: none;
+}
+
+.pulp-editor-container::-webkit-scrollbar {
+  display: none;
+}
+
+/* Pulp Floating Controls */
+.pulp-controls {
+  position: absolute;
+  bottom: 40px;
+  right: 40px;
+  display: flex;
+  gap: 15px;
+  z-index: 50;
+}
+
+.pulp-btn {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: var(--pulp-base);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  box-shadow:
+    6px 6px 12px var(--pulp-shadow),
+    -6px -6px 12px var(--pulp-highlight);
+  transition: all 0.2s ease;
+  border: none;
+  font-family: 'Space Mono', monospace;
+  font-weight: bold;
+  font-size: 0.7rem;
+  color: var(--pulp-ink);
+}
+
+.pulp-btn:hover {
+  box-shadow:
+    2px 2px 4px var(--pulp-shadow),
+    -2px -2px 4px var(--pulp-highlight);
+  transform: translateY(1px);
+}
+
+.pulp-btn:active {
+  box-shadow:
+    inset 4px 4px 8px var(--pulp-shadow),
+    inset -4px -4px 8px var(--pulp-highlight);
+}
+
+.pulp-btn.primary {
+  color: var(--pulp-accent);
+}
+
+/* Pulp Status Bar */
+.pulp-status-bar {
+  position: absolute;
+  left: 40px;
+  bottom: 40px;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--pulp-ink);
+  opacity: 0.6;
+}
+
+.pulp-pulse {
+  width: 6px;
+  height: 6px;
+  background: var(--pulp-accent);
+  border-radius: 50%;
+  animation: pulpPulse 2s infinite;
+}
+
+@keyframes pulpPulse {
+  0% {
+    opacity: 0.3;
+  }
+
+  50% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0.3;
+  }
+}
+
+/* Inline Mic Icon with Badge */
+.inline-mic-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: 8px;
+  vertical-align: middle;
+  color: var(--pulp-ink);
+  opacity: 0.5;
+  transition: opacity 0.2s, color 0.2s;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+}
+
+.inline-mic-btn:hover {
+  opacity: 1;
+  color: var(--pulp-accent);
+}
+
+.inline-mic-btn .mic-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: 'Space Mono', monospace;
+  background: var(--pulp-accent);
+  color: white;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Modal styles continue below */
@@ -219,13 +454,14 @@ html {
   left: 0;
   right: 0;
   z-index: 50;
-  background-color: #18181b;
-  /* zinc-900 */
+  background-color: var(--pulp-base);
   border-top-left-radius: 24px;
   border-top-right-radius: 24px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 2px solid var(--pulp-shadow);
   overflow: hidden;
-  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.8);
+  box-shadow:
+    0 -10px 30px var(--pulp-shadow),
+    0 -20px 60px var(--pulp-shadow);
 
   /* Start hidden (pushed down) */
   transform: translateY(100%);

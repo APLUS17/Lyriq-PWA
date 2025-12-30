@@ -11,6 +11,7 @@ export interface AudioTake {
 export interface Lyric {
   id: string;
   html: string;
+  takes?: AudioTake[];
 }
 
 export interface Section {
