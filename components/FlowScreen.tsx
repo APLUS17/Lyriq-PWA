@@ -742,7 +742,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
     }).filter(line => line.trim() !== '');
 
     return (
-        <div className="w-full h-full fixed inset-0 z-50 bg-zinc-950 flex flex-col font-sans">
+        <div className="w-full h-full fixed inset-0 z-50 bg-zinc-950 flex flex-col font-sans overflow-hidden">
             {/* Page Header */}
             <div className="absolute top-0 left-0 right-0 p-6 z-40 flex items-center justify-between">
                 <button onClick={onBack} className="p-2 text-gray-400 hover:text-white transition-colors">
@@ -760,7 +760,7 @@ const FlowScreen: React.FC<FlowScreenProps> = ({ viewState, onViewStateChange, s
             {/* Lyrics Area (Main Page Content) */}
             <div
                 ref={lyricsContainerRef}
-                className="flex-grow overflow-y-auto px-4 md:px-8 pt-24 md:pt-[50vh] pb-48 md:pb-[50vh] flex flex-col items-center space-y-6 text-center lyriq-player-view"
+                className="flex-grow overflow-y-auto px-4 md:px-8 pt-24 pb-48 flex flex-col items-center space-y-6 text-center lyriq-player-view"
                 onScroll={handleUserScroll}
             >
                 {isTranscribing ? (

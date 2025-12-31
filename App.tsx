@@ -901,7 +901,7 @@ const App: React.FC = () => {
     };
 
     return (
-        <div className="bg-black w-full min-h-screen overflow-hidden">
+        <div className="bg-black w-full h-full overflow-hidden">
             <AnimatePresence mode="wait">
                 {currentScreen === 'home' ? (
                     <motion.div
